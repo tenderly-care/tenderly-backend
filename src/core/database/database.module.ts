@@ -7,7 +7,8 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
     MongooseModule.forRootAsync({
       imports: [ConfigModule],
       useFactory: async (configService: ConfigService) => {
-        const isProduction = configService.get<string>('app.env') === 'production';
+        const isProduction =
+          configService.get<string>('app.env') === 'production';
         return {
           uri: configService.get<string>('database.mongodb.uri'),
           // Basic options for development

@@ -18,16 +18,18 @@ async function bootstrap() {
   const apiPrefix = configService.get<string>('app.apiPrefix') || 'api/v1';
 
   // Security middleware
-  app.use(helmet({
-    contentSecurityPolicy: {
-      directives: {
-        defaultSrc: ["'self'"],
-        styleSrc: ["'self'", "'unsafe-inline'"],
-        scriptSrc: ["'self'"],
-        imgSrc: ["'self'", 'data:', 'https:'],
+  app.use(
+    helmet({
+      contentSecurityPolicy: {
+        directives: {
+          defaultSrc: ["'self'"],
+          styleSrc: ["'self'", "'unsafe-inline'"],
+          scriptSrc: ["'self'"],
+          imgSrc: ["'self'", 'data:', 'https:'],
+        },
       },
-    },
-  }));
+    }),
+  );
 
   // Compression middleware
   app.use(compression());
@@ -46,7 +48,8 @@ async function bootstrap() {
       whitelist: true, // Strip properties that do not have decorators
       forbidNonWhitelisted: true, // Throw error if non-whitelisted properties are found
       transform: true, // Automatically transform payloads to be objects typed according to their DTO classes
-      disableErrorMessages: configService.get<string>('app.env') === 'production',
+      disableErrorMessages:
+        configService.get<string>('app.env') === 'production',
     }),
   );
 
@@ -57,10 +60,15 @@ async function bootstrap() {
   if (configService.get<string>('app.env') !== 'production') {
     const config = new DocumentBuilder()
       .setTitle('Tenderly API')
-      .setDescription('Comprehensive API documentation for Tenderly OB-GYN Telemedicine Platform')
+      .setDescription(
+        'Comprehensive API documentation for Tenderly OB-GYN Telemedicine Platform',
+      )
       .setVersion('1.1')
       .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' })
-      .addTag('Authentication', 'User authentication and authorization with full session management')
+      .addTag(
+        'Authentication',
+        'User authentication and authorization with full session management',
+      )
       .addTag('Sessions', 'Session management and control')
       .addTag('MFA', 'Multi-Factor Authentication management')
       .addTag('Users', 'User profile and role management')
@@ -79,7 +87,9 @@ async function bootstrap() {
       },
     });
 
-    console.log(`📚 Swagger docs available at: http://localhost:${port}/${apiPrefix}/docs`);
+    console.log(
+      `📚 Swagger docs available at: http://localhost:${port}/${apiPrefix}/docs`,
+    );
   }
 
   // Graceful shutdown
@@ -90,8 +100,10 @@ async function bootstrap() {
   });
 
   await app.listen(port);
-  
-  console.log(`🚀 Tenderly Backend running on: http://localhost:${port}/${apiPrefix}`);
+
+  console.log(
+    `🚀 Tenderly Backend running on: http://localhost:${port}/${apiPrefix}`,
+  );
   console.log(`🌍 Environment: ${configService.get<string>('app.env')}`);
 }
 

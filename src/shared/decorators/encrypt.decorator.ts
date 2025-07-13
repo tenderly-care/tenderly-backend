@@ -11,9 +11,14 @@ import { EncryptedData } from '../../security/encryption/encryption.service';
 export function Encrypt() {
   return function (target: any, propertyKey: string) {
     // Store metadata about encrypted fields
-    const encryptedFields = Reflect.getMetadata('encrypted:fields', target.constructor) || [];
+    const encryptedFields =
+      Reflect.getMetadata('encrypted:fields', target.constructor) || [];
     encryptedFields.push(propertyKey);
-    Reflect.defineMetadata('encrypted:fields', encryptedFields, target.constructor);
+    Reflect.defineMetadata(
+      'encrypted:fields',
+      encryptedFields,
+      target.constructor,
+    );
 
     // Transform for serialization (encrypt when saving to DB)
     Transform(({ value }) => {
@@ -39,7 +44,8 @@ export function Encrypt() {
  * Utility function to check if a field is marked for encryption
  */
 export function isEncryptedField(target: any, propertyKey: string): boolean {
-  const encryptedFields = Reflect.getMetadata('encrypted:fields', target.constructor) || [];
+  const encryptedFields =
+    Reflect.getMetadata('encrypted:fields', target.constructor) || [];
   return encryptedFields.includes(propertyKey);
 }
 

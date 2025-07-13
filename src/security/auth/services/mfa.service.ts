@@ -5,7 +5,11 @@ import { Model } from 'mongoose';
 import * as speakeasy from 'speakeasy';
 import * as QRCode from 'qrcode';
 import * as crypto from 'crypto';
-import { User, UserDocument, AccountStatus } from '../../../modules/users/schemas/user.schema';
+import {
+  User,
+  UserDocument,
+  AccountStatus,
+} from '../../../modules/users/schemas/user.schema';
 import { CacheService } from '../../../core/cache/cache.service';
 import { AuditService } from '../../audit/audit.service';
 
@@ -32,7 +36,7 @@ export class MFAService {
    */
   async initializeMFASetup(
     userId: string,
-    method: 'sms' | 'email' | 'authenticator'
+    method: 'sms' | 'email' | 'authenticator',
   ): Promise<MFASetupResult> {
     const user = await this.userModel.findById(userId);
     if (!user) {
@@ -63,7 +67,9 @@ export class MFAService {
   /**
    * Setup authenticator-based MFA (TOTP)
    */
-  private async setupAuthenticatorMFA(user: UserDocument): Promise<MFASetupResult> {
+  private async setupAuthenticatorMFA(
+    user: UserDocument,
+  ): Promise<MFASetupResult> {
     // Generate secret for TOTP
     const secret = speakeasy.generateSecret({
       name: `Tenderly (${user.email})`,
@@ -85,7 +91,7 @@ export class MFAService {
         backupCodes,
         method: 'authenticator',
       },
-      300 // 5 minutes
+      300, // 5 minutes
     );
 
     await this.auditService.logAuthEvent(
@@ -93,7 +99,7 @@ export class MFAService {
       'mfa_setup_init',
       'unknown',
       'MFA setup initialized',
-      true
+      true,
     );
 
     return {
@@ -115,7 +121,7 @@ export class MFAService {
   private async setupSMSMFA(user: UserDocument): Promise<MFASetupResult> {
     // Generate and send SMS verification code
     const code = this.generateSMSCode();
-    
+
     // Store code temporarily
     await this.cacheService.set(
       `mfa_setup:${user._id}:sms`,
@@ -124,7 +130,7 @@ export class MFAService {
         phone: user.phone,
         method: 'sms',
       },
-      300 // 5 minutes
+      300, // 5 minutes
     );
 
     // TODO: Integrate with SMS service (Twilio)
@@ -147,7 +153,7 @@ export class MFAService {
   private async setupEmailMFA(user: UserDocument): Promise<MFASetupResult> {
     // Generate and send email verification code
     const code = this.generateEmailCode();
-    
+
     // Store code temporarily
     await this.cacheService.set(
       `mfa_setup:${user._id}:email`,
@@ -156,7 +162,7 @@ export class MFAService {
         email: user.email,
         method: 'email',
       },
-      300 // 5 minutes
+      300, // 5 minutes
     );
 
     // TODO: Integrate with email service
@@ -179,16 +185,20 @@ export class MFAService {
   async verifyMFASetup(
     userId: string,
     method: 'sms' | 'email' | 'authenticator',
-    code: string
+    code: string,
   ): Promise<boolean> {
     const user = await this.userModel.findById(userId);
     if (!user) {
       throw new BadRequestException('User not found');
     }
 
-    const setupData = await this.cacheService.get(`mfa_setup:${userId}:${method}`);
+    const setupData = await this.cacheService.get(
+      `mfa_setup:${userId}:${method}`,
+    );
     if (!setupData) {
-      throw new BadRequestException('MFA setup session expired. Please restart setup.');
+      throw new BadRequestException(
+        'MFA setup session expired. Please restart setup.',
+      );
     }
 
     let isValid = false;
@@ -215,11 +225,11 @@ export class MFAService {
         // Enable MFA
         user.isMFAEnabled = true;
         user.accountStatus = AccountStatus.ACTIVE;
-        
+
         if (!user.mfaSettings) {
           user.mfaSettings = {} as any;
         }
-        
+
         user.mfaSettings.preferredMethod = method;
         user.mfaSettings.enabledMethods = [method];
         user.mfaSettings.setupCompletedAt = new Date();
@@ -234,10 +244,12 @@ export class MFAService {
           'mfa_enabled',
           'unknown',
           `MFA enabled with method: ${method}`,
-          true
+          true,
         );
 
-        this.logger.log(`MFA enabled for user ${userId} with method: ${method}`);
+        this.logger.log(
+          `MFA enabled for user ${userId} with method: ${method}`,
+        );
         return true;
       } else {
         await this.auditService.logAuthEvent(
@@ -245,7 +257,7 @@ export class MFAService {
           'mfa_setup_failed',
           'unknown',
           `Invalid MFA code during setup: ${method}`,
-          false
+          false,
         );
         throw new BadRequestException('Invalid verification code');
       }
@@ -258,14 +270,18 @@ export class MFAService {
   /**
    * Generate MFA code for login
    */
-  async generateLoginMFA(userId: string, method: 'sms' | 'email'): Promise<void> {
+  async generateLoginMFA(
+    userId: string,
+    method: 'sms' | 'email',
+  ): Promise<void> {
     const user = await this.userModel.findById(userId);
     if (!user || !user.isMFAEnabled) {
       throw new BadRequestException('MFA not enabled for this user');
     }
 
-    const code = method === 'sms' ? this.generateSMSCode() : this.generateEmailCode();
-    
+    const code =
+      method === 'sms' ? this.generateSMSCode() : this.generateEmailCode();
+
     // Store code for verification
     await this.cacheService.set(
       `mfa_login:${userId}:${method}`,
@@ -274,7 +290,7 @@ export class MFAService {
         attempts: 0,
         generatedAt: new Date(),
       },
-      300 // 5 minutes
+      300, // 5 minutes
     );
 
     if (method === 'sms') {
@@ -292,7 +308,7 @@ export class MFAService {
   async verifyLoginMFA(
     userId: string,
     code: string,
-    method?: 'sms' | 'email' | 'authenticator'
+    method?: 'sms' | 'email' | 'authenticator',
   ): Promise<boolean> {
     const user = await this.userModel.findById(userId);
     if (!user || !user.isMFAEnabled) {
@@ -310,9 +326,11 @@ export class MFAService {
     // Check backup codes
     if (user.mfaBackupCodes && user.mfaBackupCodes.includes(code)) {
       // Remove used backup code
-      user.mfaBackupCodes = user.mfaBackupCodes.filter(backupCode => backupCode !== code);
+      user.mfaBackupCodes = user.mfaBackupCodes.filter(
+        (backupCode) => backupCode !== code,
+      );
       await user.save();
-      
+
       await this.recordMFASuccess(userId, 'backup_code');
       this.logger.warn(`Backup code used for user ${userId}`);
       return true;
@@ -321,7 +339,9 @@ export class MFAService {
     // Check SMS/Email codes
     for (const mfaMethod of ['sms', 'email']) {
       if (!method || method === mfaMethod) {
-        const loginData = await this.cacheService.get(`mfa_login:${userId}:${mfaMethod}`);
+        const loginData = await this.cacheService.get(
+          `mfa_login:${userId}:${mfaMethod}`,
+        );
         if (loginData && loginData.code === code) {
           await this.cacheService.delete(`mfa_login:${userId}:${mfaMethod}`);
           await this.recordMFASuccess(userId, mfaMethod);
@@ -336,7 +356,7 @@ export class MFAService {
       'mfa_failed',
       'unknown',
       'Invalid MFA code during login',
-      false
+      false,
     );
 
     return false;
@@ -345,7 +365,11 @@ export class MFAService {
   /**
    * Disable MFA for a user
    */
-  async disableMFA(userId: string, password: string, mfaCode: string): Promise<void> {
+  async disableMFA(
+    userId: string,
+    password: string,
+    mfaCode: string,
+  ): Promise<void> {
     const user = await this.userModel.findById(userId);
     if (!user) {
       throw new BadRequestException('User not found');
@@ -377,7 +401,7 @@ export class MFAService {
       'mfa_disabled',
       'unknown',
       'MFA disabled by user',
-      true
+      true,
     );
 
     this.logger.log(`MFA disabled for user ${userId}`);
@@ -423,7 +447,10 @@ export class MFAService {
   /**
    * Record successful MFA verification
    */
-  private async recordMFASuccess(userId: string, method: string): Promise<void> {
+  private async recordMFASuccess(
+    userId: string,
+    method: string,
+  ): Promise<void> {
     const user = await this.userModel.findById(userId);
     if (user && user.mfaSettings) {
       user.mfaSettings.lastUsedMethod = method;
@@ -436,7 +463,7 @@ export class MFAService {
       'mfa_success',
       'unknown',
       `MFA verified with method: ${method}`,
-      true
+      true,
     );
   }
 }

@@ -6,7 +6,9 @@ export default () => ({
     port: parseInt(process.env.PORT || '3000', 10),
     env: process.env.NODE_ENV || 'development',
     apiPrefix: process.env.API_PREFIX || 'api/v1',
-    corsOrigins: process.env.CORS_ORIGINS?.split(',') || ['http://localhost:3000'],
+    corsOrigins: process.env.CORS_ORIGINS?.split(',') || [
+      'http://localhost:3000',
+    ],
   },
 
   // Database Configuration
@@ -27,7 +29,8 @@ export default () => ({
   // Security Configuration
   security: {
     jwt: {
-      secret: process.env.JWT_SECRET || 'super-secret-jwt-key-change-in-production',
+      secret:
+        process.env.JWT_SECRET || 'super-secret-jwt-key-change-in-production',
       accessTokenExpiry: process.env.JWT_ACCESS_EXPIRY || '15m',
       refreshTokenExpiry: process.env.JWT_REFRESH_EXPIRY || '7d',
       algorithm: 'HS256',
@@ -40,7 +43,8 @@ export default () => ({
       keySize: 32,
       ivSize: 16,
       tagSize: 16,
-      dataEncryptionKey: process.env.DATA_ENCRYPTION_KEY || 'change-this-key-in-production',
+      dataEncryptionKey:
+        process.env.DATA_ENCRYPTION_KEY || 'change-this-key-in-production',
     },
     cors: {
       enabled: true,
@@ -93,7 +97,9 @@ export default () => ({
     diagnosis: {
       baseUrl: process.env.AI_DIAGNOSIS_URL,
       apiKey: process.env.AI_DIAGNOSIS_API_KEY,
-      confidenceThreshold: parseFloat(process.env.AI_CONFIDENCE_THRESHOLD || '0.7'),
+      confidenceThreshold: parseFloat(
+        process.env.AI_CONFIDENCE_THRESHOLD || '0.7',
+      ),
     },
   },
 
@@ -133,7 +139,8 @@ export default () => ({
       secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
       s3: {
         bucket: process.env.AWS_S3_BUCKET || 'tenderly-documents',
-        prescriptionsBucket: process.env.AWS_S3_PRESCRIPTIONS_BUCKET || 'tenderly-prescriptions',
+        prescriptionsBucket:
+          process.env.AWS_S3_PRESCRIPTIONS_BUCKET || 'tenderly-prescriptions',
         cdnDomain: process.env.AWS_CLOUDFRONT_DOMAIN,
       },
       kms: {
@@ -224,7 +231,10 @@ export default () => ({
     enabled: process.env.AUDIT_ENABLED !== 'false',
     retention: {
       authEvents: parseInt(process.env.AUDIT_AUTH_RETENTION || '2555', 10), // 7 years in days
-      dataAccess: parseInt(process.env.AUDIT_DATA_ACCESS_RETENTION || '3653', 10), // 10 years in days
+      dataAccess: parseInt(
+        process.env.AUDIT_DATA_ACCESS_RETENTION || '3653',
+        10,
+      ), // 10 years in days
       systemEvents: parseInt(process.env.AUDIT_SYSTEM_RETENTION || '1095', 10), // 3 years in days
     },
     alerting: {
@@ -237,7 +247,10 @@ export default () => ({
   // Compliance Configuration
   compliance: {
     dataRetention: {
-      patientRecords: parseInt(process.env.DATA_RETENTION_PATIENT || '3653', 10), // 10 years
+      patientRecords: parseInt(
+        process.env.DATA_RETENTION_PATIENT || '3653',
+        10,
+      ), // 10 years
       auditLogs: parseInt(process.env.DATA_RETENTION_AUDIT || '2555', 10), // 7 years
       backups: parseInt(process.env.DATA_RETENTION_BACKUP || '2555', 10), // 7 years
     },
@@ -258,7 +271,8 @@ export default () => ({
   features: {
     aiDiagnosis: process.env.FEATURE_AI_DIAGNOSIS === 'true',
     videoConsultation: process.env.FEATURE_VIDEO_CONSULTATION !== 'false',
-    whatsappNotifications: process.env.FEATURE_WHATSAPP_NOTIFICATIONS === 'true',
+    whatsappNotifications:
+      process.env.FEATURE_WHATSAPP_NOTIFICATIONS === 'true',
     digitalPrescriptions: process.env.FEATURE_DIGITAL_PRESCRIPTIONS !== 'false',
     emergencyProtocols: process.env.FEATURE_EMERGENCY_PROTOCOLS === 'true',
     ndhmIntegration: process.env.FEATURE_NDHM_INTEGRATION === 'true',
