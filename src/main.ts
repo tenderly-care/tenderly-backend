@@ -1,0 +1,101 @@
+import 'reflect-metadata';
+import { NestFactory } from '@nestjs/core';
+import { ValidationPipe } from '@nestjs/common';
+import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
+import { ConfigService } from '@nestjs/config';
+import helmet from 'helmet';
+import * as compression from 'compression';
+
+import { AppModule } from './app.module';
+
+async function bootstrap() {
+  const app = await NestFactory.create(AppModule, {
+    logger: ['error', 'warn', 'log', 'debug', 'verbose'],
+  });
+
+  const configService = app.get(ConfigService);
+  const port = configService.get<number>('app.port') || 3000;
+  const apiPrefix = configService.get<string>('app.apiPrefix') || 'api/v1';
+
+  // Security middleware
+  app.use(helmet({
+    contentSecurityPolicy: {
+      directives: {
+        defaultSrc: ["'self'"],
+        styleSrc: ["'self'", "'unsafe-inline'"],
+        scriptSrc: ["'self'"],
+        imgSrc: ["'self'", 'data:', 'https:'],
+      },
+    },
+  }));
+
+  // Compression middleware
+  app.use(compression());
+
+  // CORS configuration
+  app.enableCors({
+    origin: configService.get<string[]>('app.corsOrigins'),
+    credentials: true,
+    methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+  });
+
+  // Global validation pipe
+  app.useGlobalPipes(
+    new ValidationPipe({
+      whitelist: true, // Strip properties that do not have decorators
+      forbidNonWhitelisted: true, // Throw error if non-whitelisted properties are found
+      transform: true, // Automatically transform payloads to be objects typed according to their DTO classes
+      disableErrorMessages: configService.get<string>('app.env') === 'production',
+    }),
+  );
+
+  // API prefix
+  app.setGlobalPrefix(apiPrefix);
+
+  // Swagger documentation
+  if (configService.get<string>('app.env') !== 'production') {
+    const config = new DocumentBuilder()
+      .setTitle('Tenderly API')
+      .setDescription('Comprehensive API documentation for Tenderly OB-GYN Telemedicine Platform')
+      .setVersion('1.1')
+      .addBearerAuth({ type: 'http', scheme: 'bearer', bearerFormat: 'JWT' })
+      .addTag('Authentication', 'User authentication and authorization with full session management')
+      .addTag('Sessions', 'Session management and control')
+      .addTag('MFA', 'Multi-Factor Authentication management')
+      .addTag('Users', 'User profile and role management')
+      .addTag('Audit', 'Audit and logging services')
+      .addTag('Devices', 'Device verification and management')
+      .addTag('Consultations', 'Medical consultations features')
+      .addTag('Prescriptions', 'Digital prescriptions handling')
+      .addTag('Payments', 'Payment processing and management')
+      .addTag('Notifications', 'Real-time notifications services')
+      .build();
+
+    const document = SwaggerModule.createDocument(app, config);
+    SwaggerModule.setup(`${apiPrefix}/docs`, app, document, {
+      swaggerOptions: {
+        persistAuthorization: true,
+      },
+    });
+
+    console.log(`📚 Swagger docs available at: http://localhost:${port}/${apiPrefix}/docs`);
+  }
+
+  // Graceful shutdown
+  process.on('SIGTERM', async () => {
+    console.log('SIGTERM received, shutting down gracefully');
+    await app.close();
+    process.exit(0);
+  });
+
+  await app.listen(port);
+  
+  console.log(`🚀 Tenderly Backend running on: http://localhost:${port}/${apiPrefix}`);
+  console.log(`🌍 Environment: ${configService.get<string>('app.env')}`);
+}
+
+bootstrap().catch((error) => {
+  console.error('❌ Error starting server:', error);
+  process.exit(1);
+});
