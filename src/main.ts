@@ -7,6 +7,7 @@ import helmet from 'helmet';
 import * as compression from 'compression';
 
 import { AppModule } from './app.module';
+import { DoctorShiftService } from './modules/consultations/services/doctor-shift.service';
 
 async function bootstrap() {
   const app = await NestFactory.create(AppModule, {
@@ -75,6 +76,7 @@ async function bootstrap() {
       .addTag('Audit', 'Audit and logging services')
       .addTag('Devices', 'Device verification and management')
       .addTag('Consultations', 'Medical consultations features')
+      .addTag('Doctor Shifts', 'Doctor shift management and assignment')
       .addTag('Prescriptions', 'Digital prescriptions handling')
       .addTag('Payments', 'Payment processing and management')
       .addTag('Notifications', 'Real-time notifications services')
@@ -98,6 +100,15 @@ async function bootstrap() {
     await app.close();
     process.exit(0);
   });
+
+  // Initialize default doctor shifts
+  try {
+    const doctorShiftService = app.get(DoctorShiftService);
+    await doctorShiftService.initializeDefaultShifts();
+    console.log('✅ Default doctor shifts initialized');
+  } catch (error) {
+    console.error('❌ Failed to initialize default doctor shifts:', error.message);
+  }
 
   await app.listen(port);
 

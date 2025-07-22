@@ -16,6 +16,9 @@ import { AuthModule } from './security/auth/auth.module';
 import { JwtAuthGuard } from './shared/guards/jwt-auth.guard';
 import { RolesGuard } from './shared/guards/roles.guard';
 
+// Feature modules
+import { ConsultationModule } from './modules/consultations/consultation.module';
+
 @Module({
   imports: [
     // Configuration
@@ -39,6 +42,9 @@ import { RolesGuard } from './shared/guards/roles.guard';
 
     // Security modules
     AuthModule,
+
+    // Feature modules
+    ConsultationModule,
   ],
   controllers: [AppController],
   providers: [

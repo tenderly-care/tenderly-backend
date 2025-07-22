@@ -95,8 +95,10 @@ export default () => ({
       temperature: parseFloat(process.env.AI_TEMPERATURE || '0.7'),
     },
     diagnosis: {
-      baseUrl: process.env.AI_DIAGNOSIS_URL,
+      baseUrl: process.env.AI_DIAGNOSIS_URL || 'http://localhost:8000',
       apiKey: process.env.AI_DIAGNOSIS_API_KEY,
+      secretKey: process.env.AI_DIAGNOSIS_SECRET_KEY || 'development_jwt_secret_key_change_in_production',
+      tokenExpiry: parseInt(process.env.AI_DIAGNOSIS_TOKEN_EXPIRY || '3600', 10), // 1 hour
       confidenceThreshold: parseFloat(
         process.env.AI_CONFIDENCE_THRESHOLD || '0.7',
       ),
