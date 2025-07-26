@@ -17,7 +17,9 @@ import {
   SymptomInputDto, 
   BasicSymptomInputDto, 
   DetailedSymptomInputDto, 
-  DetailedDiagnosisResponseDto 
+  DetailedDiagnosisResponseDto,
+  AIAgentSymptomCollectionDto,
+  AIDiagnosisResponseDto 
 } from '../dto/consultation.dto';
 import { CacheService } from '../../../core/cache/cache.service';
 import { AuditService } from '../../../security/audit/audit.service';
@@ -40,6 +42,222 @@ export class ConsultationService {
     private aiAgentService: AIAgentService,
     private paymentService: PaymentService,
   ) {}
+
+  /**
+   * Check AI service health and JWT authentication
+   */
+  async checkAIServiceHealth(): Promise<{
+    status: string;
+    aiService: {
+      connectivity: string;
+      authentication: string;
+      latency?: number;
+    };
+    tokenService: {
+      status: string;
+      tokenInfo?: any;
+    };
+    timestamp: string;
+  }> {
+    const startTime = Date.now();
+    const result = {
+      status: 'healthy',
+      aiService: {
+        connectivity: 'unknown',
+        authentication: 'unknown',
+        latency: undefined as number | undefined,
+      },
+      tokenService: {
+        status: 'unknown',
+        tokenInfo: undefined as any,
+      },
+      timestamp: new Date().toISOString(),
+    };
+
+    try {
+      // Test AI service health
+      const aiHealthResult = await this.aiAgentService.healthCheck();
+      result.aiService.connectivity = aiHealthResult.status;
+      result.aiService.latency = aiHealthResult.latency;
+      
+      if (aiHealthResult.status === 'healthy') {
+        result.aiService.authentication = 'verified';
+      } else {
+        result.aiService.authentication = 'failed';
+        result.status = 'degraded';
+      }
+    } catch (error) {
+      this.logger.error('AI service health check failed:', error);
+      result.aiService.connectivity = 'failed';
+      result.aiService.authentication = 'failed';
+      result.status = 'degraded';
+    }
+
+    // Test token service
+    try {
+      // Import AITokenService to test token generation
+      const { AITokenService } = await import('./ai-token.service');
+      const aiTokenService = new AITokenService(
+        this.configService,
+        this.cacheService
+      );
+      
+      const tokenInfo = await aiTokenService.getTokenInfo();
+      result.tokenService.status = tokenInfo ? 'healthy' : 'failed';
+      result.tokenService.tokenInfo = tokenInfo;
+      
+      if (!tokenInfo) {
+        result.status = 'degraded';
+      }
+    } catch (error) {
+      this.logger.error('Token service health check failed:', error);
+      result.tokenService.status = 'failed';
+      result.status = 'degraded';
+    }
+
+    const totalLatency = Date.now() - startTime;
+    this.logger.log(`AI service health check completed in ${totalLatency}ms - Status: ${result.status}`);
+    
+    return result;
+  }
+
+  /**
+   * Collect AI Agent symptoms and retrieve diagnosis
+   */
+  async collectAIAgentSymptoms(
+    patientId: string,
+    aiAgentSymptomCollectionDto: AIAgentSymptomCollectionDto,
+    requestMetadata?: { ipAddress: string; userAgent: string }
+  ): Promise<AIDiagnosisResponseDto> {
+    try {
+      this.logger.log(`Collecting AI Agent symptoms for patient: ${patientId}`);
+      
+      // Validate input according to schema rules
+      this.validateAISymptoms(aiAgentSymptomCollectionDto, patientId);
+
+      // Transform or map input as needed for internal processing
+      const transformedInput = this.transformAISymptoms(aiAgentSymptomCollectionDto);
+
+      // Call AI Agent service to get diagnosis
+      const aiDiagnosis = await this.aiAgentService.getDiagnosisFromAgent(
+        patientId,
+        transformedInput,
+        requestMetadata
+      );
+
+      // Log audit event for AI agent symptom collection
+      await this.auditService.logDataAccess(
+        patientId,
+        'ai-agent-symptoms',
+        'create',
+        `ai_symptoms_${patientId}_${Date.now()}`,
+        undefined,
+        {
+          symptoms: aiAgentSymptomCollectionDto.diagnosis_request.symptoms,
+          patientAge: aiAgentSymptomCollectionDto.diagnosis_request.patient_age,
+          severityLevel: aiAgentSymptomCollectionDto.diagnosis_request.severity_level,
+          duration: aiAgentSymptomCollectionDto.diagnosis_request.duration,
+          onset: aiAgentSymptomCollectionDto.diagnosis_request.onset,
+          progression: aiAgentSymptomCollectionDto.diagnosis_request.progression,
+          aiDiagnosis: {
+            diagnosis: aiDiagnosis.diagnosis,
+            confidence: aiDiagnosis.confidence,
+            severity: aiDiagnosis.severity
+          }
+        },
+        requestMetadata
+      );
+
+      return aiDiagnosis;
+    } catch (error) {
+      this.logger.error(`Failed to collect AI Agent symptoms for patient ${patientId}: ${error.message}`);
+      
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      throw new InternalServerErrorException('Failed to collect AI Agent symptoms and generate diagnosis');
+    }
+  }
+
+  private validateAISymptoms(aiAgentSymptomCollectionDto: AIAgentSymptomCollectionDto, patientId: string): void {
+    // Extract diagnosis_request from nested structure
+    const diagnosisRequest = aiAgentSymptomCollectionDto.diagnosis_request;
+    
+    if (!diagnosisRequest) {
+      throw new BadRequestException('diagnosis_request is required');
+    }
+
+    // Validate symptoms array length (1-3 items as per schema rules)
+    if (!diagnosisRequest.symptoms || 
+        !Array.isArray(diagnosisRequest.symptoms) ||
+        diagnosisRequest.symptoms.length < 1 || 
+        diagnosisRequest.symptoms.length > 3) {
+      throw new BadRequestException('Symptoms must be an array with 1-3 items');
+    }
+
+    // Validate patient age range (12-100 as per schema rules)
+    if (!diagnosisRequest.patient_age ||
+        diagnosisRequest.patient_age < 12 ||
+        diagnosisRequest.patient_age > 100) {
+      throw new BadRequestException('Patient age must be between 12 and 100 years');
+    }
+
+    // Validate severity level
+    const validSeverityLevels = ['mild', 'moderate', 'severe'];
+    if (diagnosisRequest.severity_level && !validSeverityLevels.includes(diagnosisRequest.severity_level)) {
+      throw new BadRequestException('Severity level must be one of: mild, moderate, severe');
+    }
+
+    // Validate duration
+    if (!diagnosisRequest.duration || 
+        typeof diagnosisRequest.duration !== 'string' ||
+        diagnosisRequest.duration.trim().length === 0) {
+      throw new BadRequestException('Duration is required and must be a non-empty string');
+    }
+
+    // Validate duration length
+    if (diagnosisRequest.duration.length > 50) {
+      throw new BadRequestException('Duration must be 50 characters or less');
+    }
+
+    // Validate symptoms are non-empty strings
+    for (const symptom of diagnosisRequest.symptoms) {
+      if (!symptom || typeof symptom !== 'string' || symptom.trim().length === 0) {
+        throw new BadRequestException('All symptoms must be non-empty strings');
+      }
+    }
+
+    // Validate optional fields
+    if (diagnosisRequest.onset && !['sudden', 'gradual', 'chronic'].includes(diagnosisRequest.onset)) {
+      throw new BadRequestException('Onset must be one of: sudden, gradual, chronic');
+    }
+
+    if (diagnosisRequest.progression && !['stable', 'improving', 'worsening', 'fluctuating'].includes(diagnosisRequest.progression)) {
+      throw new BadRequestException('Progression must be one of: stable, improving, worsening, fluctuating');
+    }
+  }
+
+  private transformAISymptoms(aiAgentSymptomCollectionDto: AIAgentSymptomCollectionDto) {
+    // Extract the diagnosis_request from nested structure
+    const diagnosisRequest = aiAgentSymptomCollectionDto.diagnosis_request;
+    
+    // Transform input for AI agent processing
+    // Keep severity level in AI agent's expected format (mild, moderate, severe)
+    const transformedInput = {
+      ...diagnosisRequest,
+      // Keep original severity level format that AI agent expects
+      severity_level: diagnosisRequest.severity_level || 'moderate',
+      // Clean and normalize symptoms
+      symptoms: diagnosisRequest.symptoms.map(symptom => symptom.trim()),
+      // Add empty arrays for missing properties that AI agent expects
+      medical_history: [] as string[],
+      // Add empty additional notes
+      additional_notes: ''
+    };
+
+    return transformedInput;
+  }
 
   /**
    * Create a new consultation with proper validation and audit logging

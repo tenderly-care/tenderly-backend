@@ -40,7 +40,9 @@ import {
   DetailedDiagnosisResponseDto,
   ConsultationSelectionDto,
   PaymentConfirmationDto,
-  DoctorInvestigationDto
+  DoctorInvestigationDto,
+  AIAgentSymptomCollectionDto,
+  AIDiagnosisResponseDto
 } from '../dto/consultation.dto';
 import { GetUser } from '../../../shared/decorators/get-user.decorator';
 import { Roles } from '../../../shared/decorators/roles.decorator';
@@ -226,43 +228,70 @@ export class ConsultationController {
 
   @Post('symptoms/collect')
   @ApiOperation({ 
-    summary: 'Structured symptom collection for production-level AI diagnosis',
-    description: 'Accepts structured symptom data and returns comprehensive AI diagnosis with consultation recommendation. Supports both legacy basic format and new structured format.'
+    summary: 'AI Agent Compatible Symptom Collection',
+    description: 'Collects symptoms in the exact format expected by tenderly-ai-agent and returns AI diagnosis with consultation recommendations'
   })
   @ApiBody({ 
-    type: StructuredSymptomRequestDto,
-    description: 'Structured symptom request containing comprehensive patient data'
+    type: AIAgentSymptomCollectionDto,
+    description: 'Symptom data in AI agent compatible format - matches tenderly-ai-agent schema',
+    examples: {
+      'Urinary Infection Symptoms': {
+        value: {
+          diagnosis_request: {
+            symptoms: ['urinary infection', 'burn during urination'],
+            patient_age: 34,
+            severity_level: 'severe',
+            duration: '3 days',
+            onset: 'sudden',
+            progression: 'stable'
+          }
+        }
+      },
+      'Vaginal Discharge Symptoms': {
+        value: {
+          diagnosis_request: {
+            symptoms: ['vaginal discharge', 'itching', 'burning sensation'],
+            patient_age: 25,
+            severity_level: 'moderate',
+            duration: '5 days',
+            onset: 'gradual',
+            progression: 'worsening'
+          }
+        }
+      }
+    }
   })
   @ApiResponse({ 
     status: HttpStatus.OK, 
-    description: 'AI diagnosis completed successfully with structured response'
+    description: 'AI diagnosis completed successfully',
+    type: AIDiagnosisResponseDto
   })
   @ApiResponse({ 
     status: HttpStatus.BAD_REQUEST, 
-    description: 'Invalid input data or missing required fields' 
+    description: 'Invalid input data - check symptoms array length (1-3 items) and patient age (12-100)' 
   })
   @ApiResponse({ 
     status: HttpStatus.SERVICE_UNAVAILABLE, 
     description: 'AI diagnosis service temporarily unavailable' 
   })
   @ApiResponse({ 
-    status: HttpStatus.CONFLICT, 
-    description: 'Patient ID mismatch or authentication issue' 
+    status: HttpStatus.UNAUTHORIZED, 
+    description: 'Authentication required - patient role only' 
   })
   @Roles(UserRole.PATIENT)
-  async collectStructuredSymptoms(
-    @Body() structuredSymptomRequestDto: StructuredSymptomRequestDto,
+  async collectSymptoms(
+    @Body() symptomData: AIAgentSymptomCollectionDto,
     @GetUser() user: any,
     @Req() req: Request
-  ) {
+  ): Promise<AIDiagnosisResponseDto> {
     const requestMetadata = {
       ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
       userAgent: req.headers['user-agent'] || 'unknown'
     };
 
-    return await this.consultationService.collectStructuredSymptoms(
+    return await this.consultationService.collectAIAgentSymptoms(
       user.id,
-      structuredSymptomRequestDto.structured_request,
+      symptomData,
       requestMetadata
     );
   }
@@ -414,5 +443,19 @@ export class ConsultationController {
       timestamp: new Date().toISOString(),
       version: '1.0.0'
     };
+  }
+
+  @Get('ai-service/health')
+  @Public()
+  @ApiOperation({
+    summary: 'Health check for AI service with JWT authentication test',
+    description: 'Tests AI service connectivity and JWT token generation'
+  })
+  @ApiResponse({
+    status: HttpStatus.OK,
+    description: 'AI service health status with authentication details'
+  })
+  async checkAIServiceHealth() {
+    return await this.consultationService.checkAIServiceHealth();
   }
 }

@@ -1,4 +1,5 @@
-import { IsNotEmpty, IsOptional, IsEnum, IsNumber, IsArray, IsString, IsObject, IsIn } from 'class-validator';
+import { IsNotEmpty, IsOptional, IsEnum, IsNumber, IsArray, IsString, IsObject, IsIn, Min, Max, MaxLength, ValidateNested } from 'class-validator';
+import { Type } from 'class-transformer';
 import { ConsultationType, ConsultationStatus } from '../schemas/consultation.schema';
 import { Encrypt } from '../../../shared/decorators/encrypt.decorator';
 
@@ -277,6 +278,49 @@ export class DetailedSymptomInputDto {
     impact_on_life: 'minimal' | 'mild' | 'moderate' | 'significant' | 'severe';
     additional_notes?: string;
   };
+}
+
+// Core diagnosis request structure (matches tenderly-ai-agent schema exactly)
+export class DiagnosisRequestDto {
+  @IsNotEmpty()
+  @IsArray()
+  @IsString({ each: true })
+  symptoms: string[];
+
+  @IsNotEmpty()
+  @IsNumber()
+  @Min(12)
+  @Max(100)
+  patient_age: number;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['mild', 'moderate', 'severe'])
+  severity_level?: 'mild' | 'moderate' | 'severe' = 'moderate';
+
+  @IsNotEmpty()
+  @IsString()
+  @MaxLength(50)
+  duration: string;
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['sudden', 'gradual', 'chronic'])
+  onset?: 'sudden' | 'gradual' | 'chronic';
+
+  @IsOptional()
+  @IsString()
+  @IsIn(['stable', 'improving', 'worsening', 'fluctuating'])
+  progression?: 'stable' | 'improving' | 'worsening' | 'fluctuating';
+}
+
+// AI Agent Compatible Symptom Collection DTO - Updated to match tenderly-ai-agent schema
+export class AIAgentSymptomCollectionDto {
+  @IsNotEmpty()
+  @IsObject()
+  @ValidateNested()
+  @Type(() => DiagnosisRequestDto)
+  diagnosis_request: DiagnosisRequestDto;
 }
 
 // New structured request DTO for production-level symptom collection

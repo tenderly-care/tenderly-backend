@@ -188,7 +188,7 @@ describe('Enhanced Consultation Endpoints (e2e)', () => {
 
     it('should return 400 for missing required patient_profile', async () => {
       const invalidData = { ...validEnhancedSymptoms };
-      delete invalidData.patient_profile;
+      delete (invalidData as any).patient_profile;
 
       await request(app.getHttpServer())
         .post('/consultations/symptoms/enhanced-collect')
@@ -199,7 +199,7 @@ describe('Enhanced Consultation Endpoints (e2e)', () => {
 
     it('should return 400 for missing required symptoms', async () => {
       const invalidData = { ...validEnhancedSymptoms };
-      delete invalidData.symptoms;
+      delete (invalidData as any).symptoms;
 
       await request(app.getHttpServer())
         .post('/consultations/symptoms/enhanced-collect')
@@ -210,7 +210,7 @@ describe('Enhanced Consultation Endpoints (e2e)', () => {
 
     it('should return 400 for missing required medical_context', async () => {
       const invalidData = { ...validEnhancedSymptoms };
-      delete invalidData.medical_context;
+      delete (invalidData as any).medical_context;
 
       await request(app.getHttpServer())
         .post('/consultations/symptoms/enhanced-collect')
@@ -221,7 +221,7 @@ describe('Enhanced Consultation Endpoints (e2e)', () => {
 
     it('should return 400 for missing required healthcare_interaction', async () => {
       const invalidData = { ...validEnhancedSymptoms };
-      delete invalidData.healthcare_interaction;
+      delete (invalidData as any).healthcare_interaction;
 
       await request(app.getHttpServer())
         .post('/consultations/symptoms/enhanced-collect')
@@ -232,7 +232,7 @@ describe('Enhanced Consultation Endpoints (e2e)', () => {
 
     it('should return 400 for missing required patient_concerns', async () => {
       const invalidData = { ...validEnhancedSymptoms };
-      delete invalidData.patient_concerns;
+      delete (invalidData as any).patient_concerns;
 
       await request(app.getHttpServer())
         .post('/consultations/symptoms/enhanced-collect')

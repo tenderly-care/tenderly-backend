@@ -4,8 +4,8 @@ import { JwtService } from '@nestjs/jwt';
 import { getModelToken } from '@nestjs/mongoose';
 import { Model } from 'mongoose';
 import * as bcrypt from 'bcryptjs';
-import { User } from '@/modules/users/schemas/user.schema';
-import { AuditLog } from '@/security/audit/schemas/audit-log.schema';
+import { User } from '../../src/modules/users/schemas/user.schema';
+import { AuditLog } from '../../src/security/audit/schemas/audit-log.schema';
 
 export class TestUtils {
   /**
@@ -78,7 +78,7 @@ export class TestUtils {
    */
   static createTestJwtPayload(user: User, sessionId: string = 'test-session-id') {
     return {
-      userId: user._id,
+      userId: (user as any)._id || 'test-user-id',
       email: user.email,
       roles: user.roles,
       sessionId,
