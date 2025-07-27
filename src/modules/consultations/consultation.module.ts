@@ -9,6 +9,7 @@ import { DoctorShiftService } from './services/doctor-shift.service';
 import { AIAgentService } from './services/ai-agent.service';
 import { AITokenService } from './services/ai-token.service';
 import { PaymentService } from './services/payment.service';
+import { SessionManagerService } from './services/session-manager.service';
 import { Consultation, ConsultationSchema } from './schemas/consultation.schema';
 import { DoctorShift, DoctorShiftSchema } from './schemas/doctor-shift.schema';
 import { CacheModule } from '../../core/cache/cache.module';
@@ -33,7 +34,7 @@ import { AuditLog, AuditLogSchema } from '../../security/audit/schemas/audit-log
     ]),
   ],
   controllers: [ConsultationController, DoctorShiftController],
-  providers: [ConsultationService, DoctorShiftService, AIAgentService, AITokenService, PaymentService, AuditService],
+  providers: [ConsultationService, DoctorShiftService, AIAgentService, AITokenService, PaymentService, AuditService, SessionManagerService],
   exports: [ConsultationService, DoctorShiftService],
 })
 export class ConsultationModule {}

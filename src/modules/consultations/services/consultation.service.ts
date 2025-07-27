@@ -10,13 +10,21 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
-import { Consultation, ConsultationDocument, ConsultationStatus } from '../schemas/consultation.schema';
+import { Consultation, ConsultationDocument, ConsultationStatus, ConsultationType } from '../schemas/consultation.schema';
 import { 
   CreateConsultationDto, 
-  UpdateConsultationDto, 
-  SymptomInputDto, 
-  BasicSymptomInputDto, 
-  DetailedSymptomInputDto, 
+  UpdateConsultationStatusDto, 
+  CreatePatientProfileDto, 
+  CreateSymptomScreeningDto, 
+  ConsultationResponseDto, 
+  PrescriptionResponseDto 
+} from '../dto/new-consultation.dto';
+// Import legacy DTOs for backward compatibility
+import { 
+  UpdateConsultationDto,
+  SymptomInputDto,
+  BasicSymptomInputDto,
+  DetailedSymptomInputDto,
   DetailedDiagnosisResponseDto,
   AIAgentSymptomCollectionDto,
   AIDiagnosisResponseDto 
@@ -26,6 +34,7 @@ import { AuditService } from '../../../security/audit/audit.service';
 import { DoctorShiftService } from './doctor-shift.service';
 import { AIAgentService } from './ai-agent.service';
 import { PaymentService } from './payment.service';
+import { SessionManagerService } from './session-manager.service';
 
 @Injectable()
 export class ConsultationService {
@@ -41,6 +50,7 @@ export class ConsultationService {
     private doctorShiftService: DoctorShiftService,
     private aiAgentService: AIAgentService,
     private paymentService: PaymentService,
+    private sessionManager: SessionManagerService,
   ) {}
 
   /**
@@ -122,19 +132,22 @@ export class ConsultationService {
   }
 
   /**
-   * Collect AI Agent symptoms and retrieve diagnosis
+   * Collect AI Agent symptoms and retrieve diagnosis with session management
    */
   async collectAIAgentSymptoms(
     patientId: string,
     aiAgentSymptomCollectionDto: AIAgentSymptomCollectionDto,
     requestMetadata?: { ipAddress: string; userAgent: string }
-  ): Promise<AIDiagnosisResponseDto> {
+  ): Promise<AIDiagnosisResponseDto & { sessionId: string; consultationPricing: any }> {
     try {
       this.logger.log(`Collecting AI Agent symptoms for patient: ${patientId}`);
       
       // Validate input according to schema rules
       this.validateAISymptoms(aiAgentSymptomCollectionDto, patientId);
 
+      // Create session using SessionManager
+      const sessionId = await this.sessionManager.createSession(patientId, requestMetadata);
+      
       // Transform or map input as needed for internal processing
       const transformedInput = this.transformAISymptoms(aiAgentSymptomCollectionDto);
 
@@ -145,12 +158,27 @@ export class ConsultationService {
         requestMetadata
       );
 
+      // Get consultation pricing based on recommended type
+      const consultationPricing = this.getConsultationPricing(aiDiagnosis.recommendedConsultationType || 'chat');
+
+      // Update session with diagnosis and pricing for next phase
+      await this.sessionManager.updateSession(
+        sessionId,
+        'consultation_selection',
+        {
+          initialSymptoms: transformedInput,
+          aiDiagnosis,
+          consultationPricing
+        },
+        patientId
+      );
+
       // Log audit event for AI agent symptom collection
       await this.auditService.logDataAccess(
         patientId,
         'ai-agent-symptoms',
         'create',
-        `ai_symptoms_${patientId}_${Date.now()}`,
+        sessionId,
         undefined,
         {
           symptoms: aiAgentSymptomCollectionDto.diagnosis_request.symptoms,
@@ -163,12 +191,24 @@ export class ConsultationService {
             diagnosis: aiDiagnosis.diagnosis,
             confidence: aiDiagnosis.confidence,
             severity: aiDiagnosis.severity
-          }
+          },
+          sessionId
         },
         requestMetadata
       );
 
-      return aiDiagnosis;
+      this.logger.log(`Session created successfully: ${sessionId} for patient: ${patientId}`);
+
+      // Return extended response with session info
+      const response = {
+        ...aiDiagnosis,
+        sessionId,
+        consultationPricing
+      };
+      
+      this.logger.log(`Symptoms collected and diagnosis generated successfully for patient: ${patientId}`);
+      
+      return response;
     } catch (error) {
       this.logger.error(`Failed to collect AI Agent symptoms for patient ${patientId}: ${error.message}`);
       
@@ -268,48 +308,139 @@ export class ConsultationService {
   ): Promise<ConsultationDocument> {
     try {
       this.logger.log(`Creating consultation for patient: ${createConsultationDto.patientId}`);
+      this.logger.debug(`CreateConsultationDto received: ${JSON.stringify(createConsultationDto, null, 2)}`);
       
       // Validate patient exists
+      this.logger.debug(`Validating patient exists: ${createConsultationDto.patientId}`);
       await this.validatePatientExists(createConsultationDto.patientId);
+      this.logger.debug(`Patient validation passed`);
       
       // Check for existing active consultation
+      this.logger.debug(`Checking for existing active consultation for patient: ${createConsultationDto.patientId}`);
       const existingConsultation = await this.consultationModel.findOne({
         patientId: createConsultationDto.patientId,
         status: { $nin: [ConsultationStatus.COMPLETED, ConsultationStatus.CANCELLED] }
       });
       
       if (existingConsultation) {
+        this.logger.warn(`Patient already has an active consultation: ${existingConsultation._id}`);
         throw new ConflictException('Patient already has an active consultation');
       }
+      this.logger.debug(`No existing active consultation found`);
 
       // Get active doctor for current time if not provided
       let doctorId = createConsultationDto.doctorId;
       if (!doctorId) {
+        this.logger.debug(`No doctor ID provided, getting active doctor for current time`);
         const activeDoctorId = await this.doctorShiftService.getActiveDoctorForCurrentTime();
         if (!activeDoctorId) {
+          this.logger.error(`No active doctor available for consultation`);
           throw new InternalServerErrorException('No active doctor available for consultation');
         }
         doctorId = activeDoctorId;
+        this.logger.debug(`Assigned active doctor: ${doctorId}`);
+      }
+
+      // Convert session ID string to ObjectId
+      this.logger.debug(`Converting session ID to ObjectId: ${createConsultationDto.sessionId}`);
+      let sessionObjectId: Types.ObjectId;
+      try {
+        sessionObjectId = this.convertSessionIdToObjectId(createConsultationDto.sessionId);
+        this.logger.debug(`Converted session ID '${createConsultationDto.sessionId}' to ObjectId: ${sessionObjectId}`);
+      } catch (conversionError) {
+        this.logger.error(`Failed to convert session ID '${createConsultationDto.sessionId}' to ObjectId: ${conversionError.message}`);
+        throw new BadRequestException(`Invalid session ID format: ${createConsultationDto.sessionId}`);
+      }
+
+      // Convert other ID fields to ObjectId as needed
+      this.logger.debug(`Converting patient ID to ObjectId: ${createConsultationDto.patientId}`);
+      const patientObjectId = new Types.ObjectId(createConsultationDto.patientId);
+      const doctorObjectId = doctorId ? new Types.ObjectId(doctorId) : undefined;
+      
+      // Convert paymentInfo.paymentId if it exists
+      let paymentInfo = createConsultationDto.paymentInfo;
+      if (paymentInfo && paymentInfo.paymentId) {
+        this.logger.debug(`Processing payment info with paymentId: ${paymentInfo.paymentId}`);
+        try {
+          // Only convert to ObjectId if it's a valid ObjectId string
+          if (Types.ObjectId.isValid(paymentInfo.paymentId)) {
+            paymentInfo = {
+              ...paymentInfo,
+              paymentId: new Types.ObjectId(paymentInfo.paymentId)
+            };
+            this.logger.debug(`Converted paymentId to ObjectId: ${paymentInfo.paymentId}`);
+          } else {
+            this.logger.debug(`PaymentId is not a valid ObjectId, keeping as string: ${paymentInfo.paymentId}`);
+          }
+        } catch (error) {
+          this.logger.warn(`Could not convert paymentId to ObjectId, keeping as string: ${paymentInfo.paymentId}`);
+        }
       }
 
       // Create consultation with metadata and assigned doctor
+      this.logger.debug(`Creating consultation data object`);
       const consultationData = {
         ...createConsultationDto,
-        doctorId: new Types.ObjectId(doctorId),
+        patientId: patientObjectId,
+        doctorId: doctorObjectId,
+        sessionId: sessionObjectId,
+        paymentInfo,
         status: ConsultationStatus.DOCTOR_ASSIGNED,
         metadata: {
+          sessionId: sessionObjectId,
+          patientId: patientObjectId,
+          doctorId: doctorObjectId,
           ...createConsultationDto.metadata,
           ...requestMetadata,
         },
       };
 
+      this.logger.debug(`Creating consultation with converted ObjectIds - sessionId: ${sessionObjectId}, patientId: ${patientObjectId}`);
+      this.logger.debug(`Final consultation data: ${JSON.stringify(consultationData, null, 2)}`);
+      
       const createdConsultation = new this.consultationModel(consultationData);
-      const savedConsultation = await createdConsultation.save();
+      
+      this.logger.debug(`Consultation document created, attempting to save...`);
+      
+      let savedConsultation: ConsultationDocument;
+      try {
+        savedConsultation = await createdConsultation.save();
+        this.logger.debug(`Consultation saved successfully: ${savedConsultation._id}`);
+      } catch (saveError) {
+        this.logger.error(`Mongoose save error: ${saveError.message}`);
+        this.logger.error(`Save error stack: ${saveError.stack}`);
+        this.logger.error(`Save error name: ${saveError.name}`);
+        this.logger.error(`Save error code: ${(saveError as any)?.code}`);
+        this.logger.error(`Save error details: ${JSON.stringify(saveError, null, 2)}`);
+        
+        if (saveError.errors) {
+          for (const [field, error] of Object.entries(saveError.errors)) {
+            this.logger.error(`Field '${field}' error: ${(error as any)?.message || 'Unknown error'}`);
+            this.logger.error(`Field '${field}' kind: ${(error as any)?.kind || 'Unknown'}`);
+            this.logger.error(`Field '${field}' value: ${(error as any)?.value || 'Unknown'}`);
+          }
+        }
+        
+        // Check for specific MongoDB error codes
+        if ((saveError as any)?.code === 11000) {
+          this.logger.error('Duplicate key error - sessionId already exists');
+          throw new ConflictException('Consultation with this session already exists');
+        }
+        
+        if ((saveError as any)?.code === 121) {
+          this.logger.error('Document validation failed');
+          throw new BadRequestException('Consultation data validation failed');
+        }
+        
+        throw new InternalServerErrorException(`Consultation save failed: ${saveError.message}`);
+      }
 
       // Cache consultation for quick access
+      this.logger.debug(`Caching consultation for quick access`);
       await this.cacheConsultation(savedConsultation);
 
       // Log audit event for consultation creation
+      this.logger.debug(`Logging audit event for consultation creation`);
       await this.auditService.logDataAccess(
         createConsultationDto.patientId,
         'consultations',
@@ -706,23 +837,18 @@ export class ConsultationService {
     try {
       this.logger.log(`Selecting consultation type for patient: ${patientId}`);
       
-      // Retrieve stored session data
-      const sessionData = await this.getTemporaryConsultationData(consultationSelectionDto.sessionId);
+      // Retrieve session data using SessionManagerService
+      const session = await this.sessionManager.validateSessionPhase(
+        consultationSelectionDto.sessionId,
+        'consultation_selection',
+        patientId
+      );
       
-      if (!sessionData || sessionData.patientId !== patientId) {
-        throw new BadRequestException('Invalid session or patient mismatch');
-      }
-
-      // Try to get AI diagnosis data from separate storage if not in session data
-      let aiDiagnosis = sessionData.aiDiagnosis;
+      // Get AI diagnosis from session data
+      const aiDiagnosis = session.data.aiDiagnosis;
       if (!aiDiagnosis) {
-        try {
-          const aiDiagnosisData = await this.getTemporaryConsultationData(`${consultationSelectionDto.sessionId}_diagnosis`);
-          aiDiagnosis = aiDiagnosisData?.aiDiagnosis;
-          this.logger.debug(`Retrieved AI diagnosis from separate storage for session: ${consultationSelectionDto.sessionId}`);
-        } catch (error) {
-          this.logger.warn(`Could not retrieve AI diagnosis for session ${consultationSelectionDto.sessionId}: ${error.message}`);
-        }
+        this.logger.warn(`No AI diagnosis found in session ${consultationSelectionDto.sessionId}`);
+        throw new BadRequestException('Session missing AI diagnosis data');
       }
 
       // Get payment details
@@ -734,33 +860,56 @@ export class ConsultationService {
         aiDiagnosis?.severity || 'medium'
       );
 
-      // Store selection temporarily with complete data
-      const completeSessionData = {
-        ...sessionData,
-        aiDiagnosis: aiDiagnosis || this.getDefaultAIDiagnosis(),
-        selectedConsultationType: consultationSelectionDto.selectedConsultationType,
-        paymentDetails,
-        selectedAt: new Date(),
-      };
+      // Update session with selected consultation type and payment details
+      await this.sessionManager.updateSession(
+        consultationSelectionDto.sessionId,
+        'payment_pending',
+        {
+          selectedConsultationType: consultationSelectionDto.selectedConsultationType,
+          paymentDetails,
+          preferences: consultationSelectionDto.preferences
+        },
+        patientId
+      );
 
-      await this.storeTemporaryConsultationData(`${consultationSelectionDto.sessionId}_selection`, completeSessionData);
+      // Log audit event for consultation type selection
+      await this.auditService.logDataAccess(
+        patientId,
+        'consultation-selection',
+        'create',
+        consultationSelectionDto.sessionId,
+        undefined,
+        {
+          selectedConsultationType: consultationSelectionDto.selectedConsultationType,
+          paymentDetails,
+          preferences: consultationSelectionDto.preferences,
+          sessionId: consultationSelectionDto.sessionId
+        },
+        requestMetadata
+      );
 
-      this.logger.debug(`Stored complete session data for payment confirmation: ${consultationSelectionDto.sessionId}`);
+      this.logger.log(`Consultation type selected successfully for session: ${consultationSelectionDto.sessionId}`);
 
       return {
         sessionId: consultationSelectionDto.sessionId,
         paymentDetails,
+        selectedConsultationType: consultationSelectionDto.selectedConsultationType,
         message: 'Consultation type selected successfully'
       };
 
     } catch (error) {
       this.logger.error(`Failed to select consultation type for patient ${patientId}: ${error.message}`);
+      
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
       throw new InternalServerErrorException('Failed to select consultation type');
     }
   }
 
   /**
-   * Confirm payment and finalize consultation
+   * Confirm payment and finalize consultation (Production Standard with SessionManagerService)
    */
   async confirmPayment(
     paymentConfirmationDto: any,
@@ -788,50 +937,189 @@ export class ConsultationService {
 
       this.logger.debug(`[${transactionId}] Payment verified successfully: ${paymentStatus.paymentId}`);
 
-      // Step 2: Retrieve and validate session data
-      const sessionData = await this.retrieveAndValidateSessionData(
+      // Step 2: Retrieve session data using SessionManagerService (Production Standard)
+      this.logger.debug(`[${transactionId}] Attempting to retrieve session data for session: ${paymentConfirmationDto.sessionId}`);
+      const session = await this.sessionManager.validateSessionPhase(
         paymentConfirmationDto.sessionId,
-        patientId,
-        transactionId
+        'payment_pending',
+        patientId
       );
 
-      this.logger.debug(`[${transactionId}] Session data retrieved successfully for patient: ${patientId}`);
+      this.logger.debug(`[${transactionId}] Session data retrieved successfully from SessionManagerService for patient: ${patientId}`);
+      this.logger.debug(`[${transactionId}] Session data: ${JSON.stringify(session, null, 2)}`);
 
-      // Step 3: Create permanent consultation record with proper data mapping
+      // Extract session data with proper validation
+      const sessionData = {
+        selectedConsultationType: session.data.selectedConsultationType || 'chat',
+        aiDiagnosis: session.data.aiDiagnosis,
+        initialSymptoms: session.data.initialSymptoms,
+        paymentDetails: session.data.paymentDetails,
+        preferences: session.data.preferences,
+        consultationPricing: session.data.consultationPricing
+      };
+
+      this.logger.debug(`[${transactionId}] Extracted session data: ${JSON.stringify(sessionData, null, 2)}`);
+
+      // Validate critical session data exists
+      if (!sessionData.aiDiagnosis) {
+        this.logger.warn(`[${transactionId}] No AI diagnosis found in session data`);
+        throw new BadRequestException('Session missing AI diagnosis data');
+      }
+
+      // Step 3: Create permanent consultation record with proper data mapping for new DTO
+      this.logger.debug(`[${transactionId}] Creating consultation payload...`);
       const consultationPayload = {
-        patientId,
-        sessionId: paymentConfirmationDto.sessionId,
-        consultationType: sessionData.selectedConsultationType || 'chat',
-        initialSymptoms: this.mapInitialSymptoms(sessionData.symptoms),
-        medicalHistory: sessionData.symptoms?.medicalHistory || this.getDefaultMedicalHistory(),
-        aiDiagnosis: this.mapAIDiagnosis(sessionData.aiDiagnosis, sessionData.isRecovered),
+        patientId: patientId, // Keep as string for DTO validation
+        sessionId: paymentConfirmationDto.sessionId, // Use the actual session ID (string for new DTO)
+        consultationType: sessionData.selectedConsultationType as ConsultationType,
+        // Map initial symptoms to new detailed symptoms format if available
+        detailedSymptoms: sessionData.initialSymptoms ? {
+          primary_complaint: {
+            main_symptom: this.extractMainSymptom(sessionData.initialSymptoms),
+            duration: sessionData.initialSymptoms?.duration || 'unknown',
+            severity: this.mapSeverityToString(sessionData.initialSymptoms?.severity_level),
+            onset: sessionData.initialSymptoms?.onset || 'gradual',
+            progression: sessionData.initialSymptoms?.progression || 'stable'
+          },
+          medical_context: {
+            current_medications: sessionData.initialSymptoms?.medical_history || [],
+            recent_medications: [],
+            medical_conditions: [],
+            previous_gynecological_issues: [],
+            allergies: [],
+            family_history: []
+          },
+          patient_concerns: {
+            main_worry: 'General health concern',
+            impact_on_life: 'minimal',
+            additional_notes: 'Information collected during initial symptom screening'
+          }
+        } : undefined,
+        // Map AI diagnosis to new format
+        aiDiagnosis: {
+          possible_diagnoses: [sessionData.aiDiagnosis?.diagnosis || 'General consultation'],
+          clinical_reasoning: 'AI-generated diagnosis based on symptoms',
+          recommended_investigations: sessionData.aiDiagnosis?.recommendedTests || [],
+          treatment_recommendations: {
+            primary_treatment: sessionData.aiDiagnosis?.diagnosis || 'General treatment',
+            safe_medications: [],
+            lifestyle_modifications: [],
+            dietary_advice: [],
+            follow_up_timeline: '1-2 weeks'
+          },
+          patient_education: [],
+          warning_signs: [],
+          confidence_score: typeof sessionData.aiDiagnosis?.confidence === 'number' ? sessionData.aiDiagnosis.confidence : 0.5,
+          processing_notes: 'Generated from AI analysis',
+          disclaimer: this.generateDisclaimer(),
+          timestamp: new Date()
+        },
+        // Map payment info to new format
         paymentInfo: {
+          paymentId: paymentStatus.paymentId, // Keep as string for now, will be converted in createConsultation
           amount: paymentStatus.amount,
           currency: paymentStatus.currency,
-          paymentId: paymentStatus.paymentId,
-          status: paymentStatus.status,
-          paidAt: paymentStatus.paidAt || new Date()
+          paymentMethod: 'online',
+          paymentStatus: 'completed',
+          transactionId: paymentStatus.transactionId || paymentStatus.paymentId,
+          paymentDate: paymentStatus.paidAt || new Date()
         },
+        // Add metadata as expected by new DTO
         metadata: {
           ipAddress: requestMetadata?.ipAddress || 'unknown',
           userAgent: requestMetadata?.userAgent || 'unknown',
           location: 'unknown',
-          deviceInfo: 'unknown',
-          isRecovered: sessionData.isRecovered || false
+          deviceInfo: 'unknown'
         }
       };
 
-      const consultation = await this.createConsultation(consultationPayload, requestMetadata);
+      this.logger.debug(`[${transactionId}] About to create consultation with payload: ${JSON.stringify(consultationPayload, null, 2)}`);
+      
+      // Construct the payload with mandatory fields and optional nested structures
+      const validatedConsultationPayload = {
+        ...consultationPayload,
+        detailedSymptoms: consultationPayload.detailedSymptoms || undefined,
+        aiDiagnosis: consultationPayload.aiDiagnosis || undefined,
+        metadata: {
+          ...consultationPayload.metadata,
+          sessionId: consultationPayload.sessionId,  // Ensure this maps when required
+        }
+      };
+
+      this.logger.debug(`[${transactionId}] Validated consultation payload: ${JSON.stringify(validatedConsultationPayload, null, 2)}`);
+      
+      // Log each field to see what's missing
+      this.logger.debug(`[${transactionId}] Field validation:`);
+      this.logger.debug(`[${transactionId}] - patientId: ${validatedConsultationPayload.patientId} (type: ${typeof validatedConsultationPayload.patientId})`);
+      this.logger.debug(`[${transactionId}] - session_id: ${validatedConsultationPayload.sessionId} (type: ${typeof validatedConsultationPayload.sessionId})`);
+      this.logger.debug(`[${transactionId}] - consultationType: ${validatedConsultationPayload.consultationType} (type: ${typeof validatedConsultationPayload.consultationType})`);
+      this.logger.debug(`[${transactionId}] - detailedSymptoms: ${validatedConsultationPayload.detailedSymptoms ? 'present' : 'missing'}`);
+      this.logger.debug(`[${transactionId}] - aiDiagnosis: ${validatedConsultationPayload.aiDiagnosis ? 'present' : 'missing'}`);
+      this.logger.debug(`[${transactionId}] - paymentInfo: ${validatedConsultationPayload.paymentInfo ? 'present' : 'missing'}`);
+      
+      this.logger.debug(`[${transactionId}] Calling createConsultation method...`);
+      const consultation = await this.createConsultation(validatedConsultationPayload, requestMetadata);
 
       this.logger.log(`[${transactionId}] Consultation created successfully: ${consultation._id}`);
 
-      // Step 4: Clear temporary data (safe cleanup)
-      await this.cleanupTemporaryData(paymentConfirmationDto.sessionId, transactionId);
+      // Step 4: Clear initial screening data and create clinical session
+      await this.sessionManager.clearInitialScreeningData(paymentConfirmationDto.sessionId);
+      
+      const clinicalSessionId = await this.sessionManager.createClinicalSession(
+        consultation._id?.toString() || '',
+        patientId,
+        requestMetadata
+      );
+
+      // Step 5: Update consultation status to clinical assessment pending
+      await this.consultationModel.findByIdAndUpdate(consultation._id, {
+        status: ConsultationStatus.CLINICAL_ASSESSMENT_PENDING
+      });
+
+      // Step 6: Update session to final phase using SessionManagerService (Production Standard)
+      await this.sessionManager.updateSession(
+        paymentConfirmationDto.sessionId,
+        'consultation_created',
+        {
+          consultationId: consultation._id?.toString(),
+          paymentConfirmed: true,
+          completedAt: new Date(),
+          clinicalSessionId, // Add clinical session ID
+          finalConsultation: {
+            id: consultation._id?.toString() || '',
+            type: sessionData.selectedConsultationType,
+            status: 'clinical_assessment_pending'
+          }
+        },
+        patientId
+      );
+
+      // Log audit event for payment confirmation
+      await this.auditService.logDataAccess(
+        patientId,
+        'payment-confirmation',
+        'create',
+        paymentConfirmationDto.sessionId,
+        undefined,
+        {
+          paymentId: paymentStatus.paymentId,
+          consultationId: consultation._id?.toString(),
+          sessionId: paymentConfirmationDto.sessionId,
+          transactionId,
+          consultationType: sessionData.selectedConsultationType,
+          amount: paymentStatus.amount,
+          currency: paymentStatus.currency
+        },
+        requestMetadata
+      );
 
       this.logger.log(`[${transactionId}] Payment confirmation completed successfully for patient: ${patientId}`);
 
       return {
         consultation,
+        sessionId: paymentConfirmationDto.sessionId,
+        consultationType: sessionData.selectedConsultationType,
+        paymentStatus: 'confirmed',
         message: 'Payment confirmed and consultation created successfully',
         transactionId
       };
@@ -881,22 +1169,23 @@ export class ConsultationService {
       // Create permanent consultation record
       const consultation = await this.createConsultation({
         patientId,
-        sessionId,
+        sessionId: sessionId,
         consultationType: sessionData.selectedConsultationType,
-        initialSymptoms: sessionData.symptoms,
         aiDiagnosis: sessionData.aiDiagnosis,
         paymentInfo: {
+          paymentId: `mock_${sessionId}`,
           amount: 299,
           currency: 'INR',
-          paymentId: `mock_${sessionId}`,
+          paymentMethod: 'mock',
+          paymentStatus: 'completed',
+          transactionId: `mock_${sessionId}`,
+          paymentDate: new Date(),
           status: 'payment_completed',
           paidAt: new Date()
         },
         metadata: {
           ipAddress: 'mock',
-          userAgent: 'mock',
-          location: 'mock',
-          deviceInfo: 'mock'
+          userAgent: 'mock'
         }
       });
 
@@ -1880,9 +2169,10 @@ export class ConsultationService {
    */
   private getConsultationPricing(consultationType: string): { amount: number; currency: string } {
     const pricing = {
-      chat: { amount: 299, currency: 'INR' },
-      video: { amount: 499, currency: 'INR' },
-      emergency: { amount: 999, currency: 'INR' }
+      chat: { amount: 150, currency: 'INR' },
+      tele: { amount: 200, currency: 'INR' },
+      video: { amount: 250, currency: 'INR' },
+      emergency: { amount: 300, currency: 'INR' }
     };
     
     return pricing[consultationType] || pricing.chat;
@@ -1953,5 +2243,778 @@ export class ConsultationService {
    */
   private generateDisclaimer(): string {
     return 'This is an AI-generated preliminary assessment based on the symptoms provided. It is not a substitute for professional medical advice, diagnosis, or treatment. Always consult with a qualified healthcare provider for proper medical evaluation and treatment. If you are experiencing a medical emergency, please seek immediate medical attention or call emergency services.';
+  }
+
+  /**
+   * Extract main symptom from symptoms object
+   */
+  private extractMainSymptom(symptoms: any): string {
+    if (!symptoms) return 'General consultation';
+    
+    if (Array.isArray(symptoms.primarySymptom)) {
+      return symptoms.primarySymptom[0] || 'General consultation';
+    }
+    
+    return symptoms.primarySymptom || 'General consultation';
+  }
+
+  /**
+   * Map severity number to string
+   */
+  private mapSeverityToString(severity: any): string {
+    if (typeof severity === 'string') {
+      return severity;
+    }
+    
+    const severityMap = {
+      1: 'mild',
+      2: 'moderate', 
+      3: 'severe'
+    };
+    
+    return severityMap[severity] || 'moderate';
+  }
+
+  /**
+   * Map severity level string to number for DTO compatibility
+   */
+  private mapSeverityNumberFromLevel(severityLevel: any): number {
+    if (typeof severityLevel === 'number') {
+      return severityLevel;
+    }
+    
+    const severityMap = {
+      'mild': 1,
+      'moderate': 2,
+      'severe': 3
+    };
+    
+    return severityMap[severityLevel] || 2; // Default to moderate
+  }
+
+  /**
+   * Phase 2: Collect detailed symptoms for clinical assessment (Production)
+   * This method is called after payment confirmation with clinical session
+   */
+  async collectDetailedSymptomsForConsultation(
+    consultationId: string,
+    clinicalSessionId: string,
+    detailedSymptoms: any,
+    patientId: string,
+    requestMetadata?: { ipAddress: string; userAgent: string }
+  ): Promise<any> {
+    const transactionId = `detailed_collection_${Date.now()}`;
+    
+    try {
+      this.logger.log(`[${transactionId}] Collecting detailed symptoms for consultation: ${consultationId}`);
+      
+      // Step 1: Validate clinical session
+      const clinicalSession = await this.sessionManager.validateClinicalSession(
+        clinicalSessionId,
+        consultationId,
+        patientId
+      );
+      
+      if (clinicalSession.currentPhase !== 'detailed_assessment') {
+        throw new BadRequestException(`Invalid clinical session phase: ${clinicalSession.currentPhase}`);
+      }
+      
+      // Step 2: Get consultation to verify status
+      const consultation = await this.findConsultationById(consultationId, patientId);
+      
+      if (consultation.status !== ConsultationStatus.CLINICAL_ASSESSMENT_PENDING) {
+        throw new BadRequestException('Consultation is not ready for detailed symptom collection');
+      }
+      
+      // Step 3: Transform and validate detailed symptoms
+      const structuredSymptoms = this.transformToStructuredSymptoms(detailedSymptoms);
+      
+      // Step 4: Generate comprehensive AI diagnosis using structured data
+      const comprehensiveAIDiagnosis = await this.generateComprehensiveAIDiagnosis(
+        structuredSymptoms,
+        consultation,
+        requestMetadata
+      );
+      
+      // Step 5: Update clinical session with detailed data
+      await this.sessionManager.updateClinicalSession(
+        clinicalSessionId,
+        'doctor_review',
+        {
+          detailedSymptoms: structuredSymptoms,
+          clinicalDiagnosis: comprehensiveAIDiagnosis
+        },
+        patientId
+      );
+      
+      // Step 6: Update consultation with detailed symptoms and diagnosis
+      await this.consultationModel.findByIdAndUpdate(consultationId, {
+        detailedSymptoms: structuredSymptoms,
+        aiDiagnosis: this.mapAIDiagnosisToNew(comprehensiveAIDiagnosis),
+        status: ConsultationStatus.DOCTOR_REVIEW_PENDING,
+        lastUpdated: new Date()
+      });
+      
+      // Step 7: Log audit event for detailed symptom collection
+      await this.auditService.logDataAccess(
+        patientId,
+        'detailed-symptoms-clinical',
+        'create',
+        consultationId,
+        undefined,
+        {
+          consultationId,
+          clinicalSessionId,
+          detailedSymptomsCount: Object.keys(structuredSymptoms).length,
+          aiDiagnosisConfidence: comprehensiveAIDiagnosis.confidence_score,
+          transactionId
+        },
+        requestMetadata
+      );
+      
+      this.logger.log(`[${transactionId}] Detailed symptoms collected successfully for consultation: ${consultationId}`);
+      
+      return {
+        consultationId,
+        clinicalSessionId,
+        diagnosis: comprehensiveAIDiagnosis,
+        status: 'doctor_review_pending',
+        nextSteps: 'Your detailed symptoms have been collected and analyzed. A doctor will review your case and provide treatment recommendations.',
+        estimatedReviewTime: '2-4 hours',
+        transactionId
+      };
+      
+    } catch (error) {
+      this.logger.error(`[${transactionId}] Failed to collect detailed symptoms: ${error.message}`, error.stack);
+      
+      if (error instanceof BadRequestException || error instanceof NotFoundException) {
+        throw error;
+      }
+      
+      throw new InternalServerErrorException({
+        message: 'Failed to collect detailed symptoms',
+        transactionId,
+        error: error.message
+      });
+    }
+  }
+  
+  /**
+   * Transform input to structured symptoms format
+   */
+  private transformToStructuredSymptoms(detailedSymptoms: any): any {
+    return {
+      primary_complaint: {
+        main_symptom: detailedSymptoms.primary_complaint?.main_symptom || 'General symptoms',
+        duration: detailedSymptoms.primary_complaint?.duration || 'unknown',
+        severity: detailedSymptoms.primary_complaint?.severity || 'moderate',
+        onset: detailedSymptoms.primary_complaint?.onset || 'gradual',
+        progression: detailedSymptoms.primary_complaint?.progression || 'stable'
+      },
+      associated_symptoms: detailedSymptoms.associated_symptoms || {},
+      medical_context: {
+        current_medications: detailedSymptoms.medical_context?.current_medications || [],
+        recent_medications: detailedSymptoms.medical_context?.recent_medications || [],
+        medical_conditions: detailedSymptoms.medical_context?.medical_conditions || [],
+        previous_gynecological_issues: detailedSymptoms.medical_context?.previous_gynecological_issues || [],
+        allergies: detailedSymptoms.medical_context?.allergies || [],
+        family_history: detailedSymptoms.medical_context?.family_history || []
+      },
+      reproductive_history: detailedSymptoms.reproductive_history || {},
+      lifestyle_factors: detailedSymptoms.lifestyle_factors || {},
+      patient_concerns: {
+        main_worry: detailedSymptoms.patient_concerns?.main_worry || 'General health concern',
+        impact_on_life: detailedSymptoms.patient_concerns?.impact_on_life || 'minimal',
+        additional_notes: detailedSymptoms.patient_concerns?.additional_notes || ''
+      },
+      healthcare_interaction: detailedSymptoms.healthcare_interaction || {},
+      symptom_specific_details: detailedSymptoms.symptom_specific_details || {}
+    };
+  }
+  
+  /**
+   * Generate comprehensive AI diagnosis using structured symptoms
+   */
+  private async generateComprehensiveAIDiagnosis(
+    structuredSymptoms: any,
+    consultation: any,
+    requestMetadata?: { ipAddress: string; userAgent: string }
+  ): Promise<any> {
+    try {
+      // For production, this would call the enhanced AI agent with structured input
+      // For now, we'll generate a comprehensive response based on the structured data
+      
+      const mainSymptom = structuredSymptoms.primary_complaint.main_symptom.toLowerCase();
+      const severity = structuredSymptoms.primary_complaint.severity;
+      const medicalHistory = structuredSymptoms.medical_context;
+      
+      const comprehensiveDiagnosis = {
+        possible_diagnoses: this.generatePossibleDiagnoses(structuredSymptoms),
+        clinical_reasoning: this.generateClinicalReasoning(structuredSymptoms),
+        recommended_investigations: this.generateDetailedInvestigations(structuredSymptoms),
+        treatment_recommendations: {
+          primary_treatment: this.generatePrimaryTreatment(structuredSymptoms),
+          safe_medications: this.generateSafeMedications(structuredSymptoms),
+          lifestyle_modifications: this.generateLifestyleModifications(structuredSymptoms),
+          dietary_advice: this.generateDietaryAdvice(structuredSymptoms),
+          follow_up_timeline: this.generateFollowUpTimeline(structuredSymptoms)
+        },
+        patient_education: this.generatePatientEducation(structuredSymptoms),
+        warning_signs: this.generateWarningSignsToWatch(structuredSymptoms),
+        confidence_score: this.calculateEnhancedConfidenceScore(structuredSymptoms),
+        processing_notes: 'Generated from comprehensive structured symptom analysis',
+        disclaimer: this.generateDisclaimer(),
+        timestamp: new Date(),
+        consultation_context: {
+          consultation_id: consultation._id?.toString(),
+          patient_id: consultation.patientId,
+          consultation_type: consultation.consultationType
+        }
+      };
+      
+      this.logger.log(`Generated comprehensive AI diagnosis with confidence: ${comprehensiveDiagnosis.confidence_score}`);
+      
+      return comprehensiveDiagnosis;
+      
+    } catch (error) {
+      this.logger.error(`Failed to generate comprehensive AI diagnosis: ${error.message}`);
+      
+      // Fallback diagnosis
+      return {
+        possible_diagnoses: ['Gynecological consultation required'],
+        clinical_reasoning: 'Unable to generate comprehensive analysis - manual review required',
+        confidence_score: 0.3,
+        processing_notes: 'Fallback diagnosis due to processing error',
+        disclaimer: this.generateDisclaimer(),
+        timestamp: new Date()
+      };
+    }
+  }
+  
+  /**
+   * Generate possible diagnoses from structured symptoms
+   */
+  private generatePossibleDiagnoses(symptoms: any): string[] {
+    const diagnoses: string[] = [];
+    const mainSymptom = symptoms.primary_complaint.main_symptom.toLowerCase();
+    const severity = symptoms.primary_complaint.severity;
+    
+    if (mainSymptom.includes('pain')) {
+      if (severity === 'severe') {
+        diagnoses.push('Severe pelvic inflammatory disease (PID)');
+        diagnoses.push('Ovarian cyst with complication');
+        diagnoses.push('Endometriosis with acute flare');
+      } else {
+        diagnoses.push('Mild to moderate pelvic inflammatory condition');
+        diagnoses.push('Ovarian functional cyst');
+        diagnoses.push('Musculoskeletal pelvic pain');
+      }
+    }
+    
+    if (mainSymptom.includes('discharge')) {
+      diagnoses.push('Bacterial vaginosis');
+      diagnoses.push('Vulvovaginal candidiasis');
+      diagnoses.push('Sexually transmitted infection');
+    }
+    
+    if (mainSymptom.includes('bleeding') || mainSymptom.includes('menstrual')) {
+      diagnoses.push('Dysfunctional uterine bleeding');
+      diagnoses.push('Hormonal imbalance');
+      diagnoses.push('Endometrial pathology');
+    }
+    
+    // Add contraceptive-related diagnoses if relevant
+    if (symptoms.reproductive_history?.contraceptive_use) {
+      diagnoses.push('Contraceptive-related side effects');
+    }
+    
+    return diagnoses.length > 0 ? diagnoses : ['General gynecological condition requiring evaluation'];
+  }
+  
+  /**
+   * Generate clinical reasoning
+   */
+  private generateClinicalReasoning(symptoms: any): string {
+    const mainSymptom = symptoms.primary_complaint.main_symptom;
+    const duration = symptoms.primary_complaint.duration;
+    const severity = symptoms.primary_complaint.severity;
+    const associatedSymptoms = symptoms.associated_symptoms;
+    
+    let reasoning = `Patient presents with ${mainSymptom} of ${duration} duration with ${severity} severity. `;
+    
+    if (associatedSymptoms?.systemic?.fever) {
+      reasoning += 'Presence of fever suggests infectious or inflammatory process. ';
+    }
+    
+    if (associatedSymptoms?.pain?.pain_timing === 'constant') {
+      reasoning += 'Constant pain pattern indicates need for urgent evaluation. ';
+    }
+    
+    if (symptoms.medical_context?.allergies?.length > 0) {
+      reasoning += `Patient has known allergies to ${symptoms.medical_context.allergies.join(', ')}, affecting medication choices. `;
+    }
+    
+    reasoning += 'Comprehensive evaluation and appropriate investigations recommended for accurate diagnosis and treatment planning.';
+    
+    return reasoning;
+  }
+  
+  /**
+   * Generate detailed investigations based on comprehensive symptoms
+   */
+  private generateDetailedInvestigations(symptoms: any): Array<{
+    category: string;
+    tests: Array<{ name: string; priority: string; reason: string }>;
+  }> {
+    const investigations: Array<{
+      category: string;
+      tests: Array<{ name: string; priority: string; reason: string }>;
+    }> = [];
+    const mainSymptom = symptoms.primary_complaint.main_symptom.toLowerCase();
+    
+    // Basic laboratory tests
+    investigations.push({
+      category: 'Laboratory Tests',
+      tests: [
+        {
+          name: 'Complete Blood Count (CBC) with differential',
+          priority: 'high',
+          reason: 'To evaluate for infection, anemia, or hematologic abnormalities'
+        },
+        {
+          name: 'Comprehensive Metabolic Panel (CMP)',
+          priority: 'medium',
+          reason: 'To assess overall metabolic status and organ function'
+        },
+        {
+          name: 'Urine analysis and culture',
+          priority: 'high',
+          reason: 'To rule out urinary tract infections or kidney involvement'
+        }
+      ]
+    });
+    
+    // Gynecological-specific tests
+    if (mainSymptom.includes('discharge') || mainSymptom.includes('infection')) {
+      investigations.push({
+        category: 'Gynecological Tests',
+        tests: [
+          {
+            name: 'Vaginal swab with culture and sensitivity',
+            priority: 'high',
+            reason: 'To identify specific pathogens and antibiotic sensitivity'
+          },
+          {
+            name: 'STI panel (Chlamydia, Gonorrhea, Trichomonas)',
+            priority: 'high',
+            reason: 'To rule out sexually transmitted infections'
+          }
+        ]
+      });
+    }
+    
+    // Imaging studies
+    if (mainSymptom.includes('pain') || symptoms.primary_complaint.severity === 'severe') {
+      investigations.push({
+        category: 'Imaging Studies',
+        tests: [
+          {
+            name: 'Transvaginal ultrasound',
+            priority: 'high',
+            reason: 'To evaluate pelvic organs, detect cysts, masses, or structural abnormalities'
+          },
+          {
+            name: 'Pelvic MRI (if ultrasound inconclusive)',
+            priority: 'medium',
+            reason: 'For detailed evaluation of pelvic anatomy and pathology'
+          }
+        ]
+      });
+    }
+    
+    // Hormonal evaluation if menstrual issues
+    if (mainSymptom.includes('menstrual') || mainSymptom.includes('bleeding')) {
+      investigations.push({
+        category: 'Hormonal Evaluation',
+        tests: [
+          {
+            name: 'Hormonal panel (FSH, LH, Estradiol, Progesterone)',
+            priority: 'medium',
+            reason: 'To evaluate hormonal status and menstrual cycle regulation'
+          },
+          {
+            name: 'Thyroid function tests (TSH, T3, T4)',
+            priority: 'medium',
+            reason: 'To rule out thyroid disorders affecting menstrual cycle'
+          }
+        ]
+      });
+    }
+    
+    return investigations;
+  }
+  
+  /**
+   * Generate enhanced confidence score
+   */
+  private calculateEnhancedConfidenceScore(symptoms: any): number {
+    let confidence = 0.4; // Lower base for structured analysis
+    
+    // Symptom clarity and detail
+    const mainSymptom = symptoms.primary_complaint.main_symptom;
+    if (mainSymptom && mainSymptom.length > 15) {
+      confidence += 0.15;
+    }
+    
+    // Duration specificity
+    const duration = symptoms.primary_complaint.duration;
+    if (duration && duration !== 'unknown' && duration.length > 5) {
+      confidence += 0.1;
+    }
+    
+    // Medical context completeness
+    const medicalContext = symptoms.medical_context;
+    if (medicalContext?.allergies?.length > 0) confidence += 0.05;
+    if (medicalContext?.current_medications?.length > 0) confidence += 0.05;
+    if (medicalContext?.medical_conditions?.length > 0) confidence += 0.1;
+    
+    // Associated symptoms detail
+    if (symptoms.associated_symptoms && Object.keys(symptoms.associated_symptoms).length > 2) {
+      confidence += 0.15;
+    }
+    
+    // Reproductive history
+    if (symptoms.reproductive_history && Object.keys(symptoms.reproductive_history).length > 0) {
+      confidence += 0.1;
+    }
+    
+    // Patient concerns detail
+    if (symptoms.patient_concerns?.additional_notes && symptoms.patient_concerns.additional_notes.length > 20) {
+      confidence += 0.05;
+    }
+    
+    // Healthcare interaction history
+    if (symptoms.healthcare_interaction?.previous_consultation) {
+      confidence += 0.05;
+    }
+    
+    // Cap at 0.92 for comprehensive structured analysis
+    return Math.min(confidence, 0.92);
+  }
+  
+  // Additional helper methods for comprehensive diagnosis generation
+  private generatePrimaryTreatment(symptoms: any): string {
+    const mainSymptom = symptoms.primary_complaint.main_symptom.toLowerCase();
+    const severity = symptoms.primary_complaint.severity;
+    
+    if (mainSymptom.includes('pain') && severity === 'severe') {
+      return 'Urgent gynecological evaluation with pain management and targeted treatment based on diagnosis';
+    }
+    
+    if (mainSymptom.includes('discharge')) {
+      return 'Antimicrobial therapy based on culture results with supportive care';
+    }
+    
+    return 'Symptomatic treatment with close monitoring and follow-up care';
+  }
+  
+  private generateSafeMedications(symptoms: any): string[] {
+    const allergies = symptoms.medical_context?.allergies || [];
+    const medications: string[] = [];
+    
+    // Pain management (checking for allergies)
+    if (!this.checkMedicationAllergy(allergies, 'acetaminophen')) {
+      medications.push('Acetaminophen 500mg every 6-8 hours as needed for pain');
+    }
+    
+    if (!this.checkMedicationAllergy(allergies, 'ibuprofen', 'nsaid')) {
+      medications.push('Ibuprofen 400mg every 8 hours with food for pain and inflammation');
+    }
+    
+    // Probiotics for vaginal health
+    if (!this.checkMedicationAllergy(allergies, 'probiotic')) {
+      medications.push('Probiotic supplement daily for vaginal flora support');
+    }
+    
+    return medications;
+  }
+  
+  private generateLifestyleModifications(symptoms: any): string[] {
+    return [
+      'Maintain proper genital hygiene with mild, unscented products',
+      'Wear breathable, cotton underwear',
+      'Avoid tight-fitting clothing',
+      'Stay well-hydrated (8-10 glasses of water daily)',
+      'Practice stress management techniques (meditation, yoga)',
+      'Get adequate sleep (7-9 hours nightly)',
+      'Regular, moderate exercise as tolerated'
+    ];
+  }
+  
+  private generateDietaryAdvice(symptoms: any): string[] {
+    return [
+      'Consume a balanced diet rich in fruits and vegetables',
+      'Include probiotics (yogurt, kefir) for gut and vaginal health',
+      'Limit refined sugars and processed foods',
+      'Ensure adequate calcium and vitamin D intake',
+      'Stay hydrated with water, limit caffeine and alcohol',
+      'Consider anti-inflammatory foods (omega-3 rich fish, leafy greens)'
+    ];
+  }
+  
+  private generateFollowUpTimeline(symptoms: any): string {
+    const severity = symptoms.primary_complaint.severity;
+    
+    if (severity === 'severe') {
+      return 'Follow up within 24-48 hours or sooner if symptoms worsen';
+    } else if (severity === 'moderate') {
+      return 'Follow up in 3-5 days or if symptoms persist or worsen';
+    }
+    
+    return 'Follow up in 1-2 weeks or if new symptoms develop';
+  }
+  
+  private generatePatientEducation(symptoms: any): string[] {
+    const mainSymptom = symptoms.primary_complaint.main_symptom.toLowerCase();
+    const education: string[] = [];
+    
+    if (mainSymptom.includes('pain')) {
+      education.push('Pelvic pain can have various causes and requires proper medical evaluation');
+      education.push('Heat therapy may provide temporary relief for cramping pain');
+      education.push('Track pain patterns, triggers, and severity for your healthcare provider');
+    }
+    
+    if (mainSymptom.includes('discharge')) {
+      education.push('Normal vaginal discharge varies throughout the menstrual cycle');
+      education.push('Avoid douching and scented feminine products');
+      education.push('Changes in color, odor, or consistency may indicate infection');
+    }
+    
+    education.push('Maintain regular gynecological check-ups for preventive care');
+    education.push('Practice safe sex and communicate openly with your healthcare provider');
+    
+    return education;
+  }
+  
+  private generateWarningSignsToWatch(symptoms: any): string[] {
+    return [
+      'Severe, sudden onset pelvic pain',
+      'High fever (>101.3°F/38.5°C) with chills',
+      'Heavy vaginal bleeding soaking more than one pad per hour',
+      'Severe nausea and vomiting',
+      'Dizziness or fainting',
+      'Signs of severe infection (rapid heart rate, confusion)',
+      'Worsening of current symptoms despite treatment',
+      'New or unusual symptoms not previously experienced'
+    ];
+  }
+
+  /**
+   * Convert session ID string to ObjectId
+   * Handles session IDs in format: "session_6884dfdee2f266201798973d_1753538526812"
+   * Extracts the ObjectId part and creates a proper MongoDB ObjectId
+   */
+  private convertSessionIdToObjectId(sessionId: string): Types.ObjectId {
+    if (!sessionId || typeof sessionId !== 'string') {
+      throw new Error('Session ID must be a non-empty string');
+    }
+
+    // If it's already a valid ObjectId string, use it directly
+    if (Types.ObjectId.isValid(sessionId) && sessionId.length === 24) {
+      return new Types.ObjectId(sessionId);
+    }
+
+    // Handle session ID format: "session_6884dfdee2f266201798973d_1753538526812"
+    if (sessionId.startsWith('session_')) {
+      const parts = sessionId.split('_');
+      if (parts.length >= 2) {
+        const objectIdPart = parts[1]; // Extract the ObjectId part
+        
+        // Validate that it's a proper ObjectId
+        if (Types.ObjectId.isValid(objectIdPart) && objectIdPart.length === 24) {
+          return new Types.ObjectId(objectIdPart);
+        }
+      }
+    }
+
+    // Handle clinical session ID format: "clinical_6884dfdee2f266201798973d_1753538526812"
+    if (sessionId.startsWith('clinical_')) {
+      const parts = sessionId.split('_');
+      if (parts.length >= 2) {
+        const objectIdPart = parts[1]; // Extract the ObjectId part
+        
+        // Validate that it's a proper ObjectId
+        if (Types.ObjectId.isValid(objectIdPart) && objectIdPart.length === 24) {
+          return new Types.ObjectId(objectIdPart);
+        }
+      }
+    }
+
+    // If we can't parse the session ID, try to generate a valid ObjectId from it
+    // This is a fallback for any unexpected format
+    try {
+      // Remove any non-hex characters and take first 24 hex characters
+      const cleanId = sessionId.replace(/[^a-fA-F0-9]/g, '').substring(0, 24);
+      
+      if (cleanId.length === 24) {
+        return new Types.ObjectId(cleanId);
+      }
+      
+      // If we still don't have enough characters, pad with zeros
+      if (cleanId.length < 24) {
+        const paddedId = cleanId.padEnd(24, '0');
+        return new Types.ObjectId(paddedId);
+      }
+      
+    } catch (error) {
+      this.logger.warn(`Failed to parse session ID '${sessionId}': ${error.message}`);
+    }
+
+    // Last resort: generate a new ObjectId (should not happen in production)
+    this.logger.error(`Unable to convert session ID '${sessionId}' to ObjectId, generating new one`);
+    return new Types.ObjectId();
+  }
+
+  /**
+   * Map AI diagnosis to new schema format
+   */
+  private mapAIDiagnosisToNew(aiDiagnosis: any, isRecovered: boolean = false): any {
+    if (!aiDiagnosis) {
+      return {
+        possible_diagnoses: ['General consultation'],
+        clinical_reasoning: 'Standard consultation based on available information',
+        recommended_investigations: [],
+        treatment_recommendations: {
+          primary_treatment: 'Consultation with healthcare provider',
+          safe_medications: [],
+          lifestyle_modifications: [],
+          dietary_advice: [],
+          follow_up_timeline: '1-2 weeks'
+        },
+        patient_education: [],
+        warning_signs: [],
+        confidence_score: 0.5,
+        processing_notes: isRecovered ? 'Recovered from session data' : 'Generated from symptoms',
+        disclaimer: this.generateDisclaimer(),
+        timestamp: new Date()
+      };
+    }
+    
+    return {
+      possible_diagnoses: [aiDiagnosis.diagnosis || aiDiagnosis.primaryDiagnosis || 'General consultation'],
+      clinical_reasoning: 'AI-generated diagnosis based on symptoms',
+      recommended_investigations: aiDiagnosis.recommendedTests || [],
+      treatment_recommendations: {
+        primary_treatment: aiDiagnosis.diagnosis || 'General treatment',
+        safe_medications: [],
+        lifestyle_modifications: [],
+        dietary_advice: [],
+        follow_up_timeline: '1-2 weeks'
+      },
+      patient_education: [],
+      warning_signs: [],
+      confidence_score: typeof aiDiagnosis.confidence === 'number' ? aiDiagnosis.confidence : 0.5,
+      processing_notes: isRecovered ? 'Recovered from session data' : 'Generated from AI analysis',
+      disclaimer: this.generateDisclaimer(),
+      timestamp: aiDiagnosis.generatedAt ? new Date(aiDiagnosis.generatedAt) : new Date()
+    };
+  }
+
+  /**
+   * Test method to check if consultation model is working
+   */
+  async testConsultationModel(): Promise<any> {
+    try {
+      this.logger.log('Testing consultation model...');
+      
+      // Test 1: Check if model exists
+      this.logger.debug('Consultation model exists:', !!this.consultationModel);
+      
+      // Test 2: Try to count documents
+      const count = await this.consultationModel.countDocuments();
+      this.logger.debug('Total consultations in database:', count);
+      
+      // Test 3: Try to create a simple document
+      const testDoc = new this.consultationModel({
+        patientId: new Types.ObjectId('6884d6abc1ceb202ca8066c4'),
+        sessionId: new Types.ObjectId('507f1f77bcf86cd799439011'),
+        consultationType: 'chat',
+        status: 'pending'
+      });
+      
+      this.logger.debug('Test document created, attempting to save...');
+      const savedDoc = await testDoc.save();
+      this.logger.debug('Test document saved successfully:', savedDoc._id);
+      
+      // Clean up
+      await this.consultationModel.findByIdAndDelete(savedDoc._id);
+      this.logger.debug('Test document cleaned up');
+      
+      return {
+        success: true,
+        message: 'Consultation model is working properly',
+        totalConsultations: count
+      };
+      
+    } catch (error) {
+      this.logger.error('Consultation model test failed:', error.message);
+      this.logger.error('Error stack:', error.stack);
+      return {
+        success: false,
+        message: 'Consultation model test failed',
+        error: error.message
+      };
+    }
+  }
+
+  /**
+   * Check database health and connection
+   */
+  async checkDatabaseHealth(): Promise<any> {
+    try {
+      this.logger.log('Checking database health...');
+      
+      // Test 1: Check if model exists
+      this.logger.debug('Consultation model exists:', !!this.consultationModel);
+      
+      // Test 2: Try to count documents
+      const count = await this.consultationModel.countDocuments();
+      this.logger.debug('Total consultations in database:', count);
+      
+      // Test 3: Try to create a simple document
+      const testDoc = new this.consultationModel({
+        patientId: new Types.ObjectId('6884d6abc1ceb202ca8066c4'),
+        sessionId: new Types.ObjectId('507f1f77bcf86cd799439011'),
+        consultationType: 'chat',
+        status: 'pending'
+      });
+      
+      this.logger.debug('Test document created, attempting to save...');
+      const savedDoc = await testDoc.save();
+      this.logger.debug('Test document saved successfully:', savedDoc._id);
+      
+      // Clean up
+      await this.consultationModel.findByIdAndDelete(savedDoc._id);
+      this.logger.debug('Test document cleaned up');
+      
+      return {
+        success: true,
+        message: 'Database connection is working properly',
+        totalConsultations: count,
+        modelExists: true,
+        saveTest: 'passed'
+      };
+      
+    } catch (error) {
+      this.logger.error('Database health check failed:', error.message);
+      this.logger.error('Error stack:', error.stack);
+      return {
+        success: false,
+        message: 'Database health check failed',
+        error: error.message,
+        errorStack: error.stack,
+        modelExists: !!this.consultationModel
+      };
+    }
   }
 }

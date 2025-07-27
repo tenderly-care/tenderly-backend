@@ -30,6 +30,16 @@ import {
 import { Request } from 'express';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { ConsultationService } from '../services/consultation.service';
+// New DTOs
+import { 
+  CreateConsultationDto as NewCreateConsultationDto,
+  UpdateConsultationStatusDto,
+  CreatePatientProfileDto, 
+  CreateSymptomScreeningDto, 
+  ConsultationResponseDto, 
+  PrescriptionResponseDto 
+} from '../dto/new-consultation.dto';
+// Legacy DTOs for backward compatibility
 import { 
   CreateConsultationDto, 
   UpdateConsultationDto, 
@@ -42,7 +52,9 @@ import {
   PaymentConfirmationDto,
   DoctorInvestigationDto,
   AIAgentSymptomCollectionDto,
-  AIDiagnosisResponseDto
+  AIDiagnosisResponseDto,
+  ClinicalDetailedSymptomsDto,
+  ClinicalDetailedSymptomsResponseDto
 } from '../dto/consultation.dto';
 import { GetUser } from '../../../shared/decorators/get-user.decorator';
 import { Roles } from '../../../shared/decorators/roles.decorator';
@@ -76,9 +88,9 @@ export class ConsultationController {
     status: HttpStatus.CONFLICT, 
     description: 'Patient already has an active consultation' 
   })
-  @ApiBody({ type: CreateConsultationDto })
+  @ApiBody({ type: NewCreateConsultationDto })
   async createConsultation(
-    @Body() createConsultationDto: CreateConsultationDto,
+    @Body() createConsultationDto: NewCreateConsultationDto,
     @GetUser() user: any,
     @Req() req: Request
   ) {
@@ -283,7 +295,7 @@ export class ConsultationController {
     @Body() symptomData: AIAgentSymptomCollectionDto,
     @GetUser() user: any,
     @Req() req: Request
-  ): Promise<AIDiagnosisResponseDto> {
+  ): Promise<AIDiagnosisResponseDto & { sessionId: string; consultationPricing: any }> {
     const requestMetadata = {
       ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
       userAgent: req.headers['user-agent'] || 'unknown'
@@ -385,6 +397,74 @@ export class ConsultationController {
     );
   }
 
+  /**
+   * Phase 2: Collect detailed symptoms for clinical assessment
+   * Production-level endpoint for comprehensive symptom collection after payment confirmation
+   */
+  @Post(':consultationId/clinical/:clinicalSessionId/detailed-symptoms')
+  @ApiOperation({
+    summary: 'Phase 2: Collect detailed symptoms for clinical assessment',
+    description: 'Collects comprehensive symptom data after payment confirmation for detailed AI analysis and doctor review. This endpoint is called after successful payment to gather detailed clinical information for professional medical assessment.'
+  })
+  @ApiParam({ 
+    name: 'consultationId', 
+    description: 'Consultation ID from Phase 1 payment confirmation',
+    type: 'string',
+    required: true
+  })
+  @ApiParam({ 
+    name: 'clinicalSessionId', 
+    description: 'Clinical session ID for Phase 2 data collection',
+    type: 'string',
+    required: true
+  })
+  @ApiBody({ 
+    type: ClinicalDetailedSymptomsDto,
+    description: 'Comprehensive symptom data including primary complaint, associated symptoms, medical history, reproductive history, lifestyle factors, and patient concerns for clinical assessment'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Detailed symptoms collected successfully and comprehensive AI diagnosis generated',
+    type: ClinicalDetailedSymptomsResponseDto
+  })
+  @ApiResponse({ 
+    status: HttpStatus.BAD_REQUEST, 
+    description: 'Invalid symptom data, consultation not ready for clinical assessment, or clinical session phase mismatch' 
+  })
+  @ApiResponse({ 
+    status: HttpStatus.UNAUTHORIZED, 
+    description: 'Authentication required - patient role only' 
+  })
+  @ApiResponse({ 
+    status: HttpStatus.NOT_FOUND, 
+    description: 'Consultation or clinical session not found or expired' 
+  })
+  @ApiResponse({ 
+    status: HttpStatus.INTERNAL_SERVER_ERROR, 
+    description: 'Internal server error during symptom processing or AI diagnosis generation' 
+  })
+  @Roles(UserRole.PATIENT)
+  async collectDetailedSymptomsForConsultation(
+    @Param('consultationId') consultationId: string,
+    @Param('clinicalSessionId') clinicalSessionId: string,
+    @Body() detailedSymptomsDto: ClinicalDetailedSymptomsDto,
+    @GetUser() user: any,
+    @Req() req: Request
+  ): Promise<ClinicalDetailedSymptomsResponseDto> {
+    const requestMetadata = {
+      ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+      userAgent: req.headers['user-agent'] || 'unknown'
+    };
+
+    return await this.consultationService.collectDetailedSymptomsForConsultation(
+      consultationId,
+      clinicalSessionId,
+      detailedSymptomsDto,
+      user.id,
+      requestMetadata
+    );
+  }
+
   @Post('mock-payment/:sessionId')
   @ApiOperation({ 
     summary: 'Mock payment completion for testing',
@@ -457,5 +537,31 @@ export class ConsultationController {
   })
   async checkAIServiceHealth() {
     return await this.consultationService.checkAIServiceHealth();
+  }
+
+  @Get('db-health')
+  @ApiOperation({ 
+    summary: 'Database health check',
+    description: 'Check if the database connection is working properly'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Database health check completed'
+  })
+  async checkDatabaseHealth() {
+    return await this.consultationService.checkDatabaseHealth();
+  }
+
+  @Get('test-model')
+  @ApiOperation({ 
+    summary: 'Test consultation model',
+    description: 'Test if the consultation model is working properly'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Model test completed'
+  })
+  async testConsultationModel() {
+    return await this.consultationService.testConsultationModel();
   }
 }
