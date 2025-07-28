@@ -1,0 +1,84 @@
+
+> tenderly-backend@0.0.1 start:dev
+> nest start --watch
+
+[2J[3J[H[[90m8:03:50 pm[0m] Starting compilation in watch mode...
+
+[[90m8:03:52 pm[0m] Found 0 errors. Watching for file changes.
+
+(node:85528) [MONGOOSE] Warning: Duplicate schema index on {"email":1} found. This is often due to declaring an index using both "index: true" and "schema.index()". Please remove the duplicate index definition.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:85528) [MONGOOSE] Warning: Duplicate schema index on {"retentionDate":1} found. This is often due to declaring an index using both "index: true" and "schema.index()". Please remove the duplicate index definition.
+(node:85528) [MONGOOSE] Warning: Duplicate schema index on {"consultationId":1} found. This is often due to declaring an index using both "index: true" and "schema.index()". Please remove the duplicate index definition.
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[NestFactory] [39m[32mStarting Nest application...[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mDatabaseModule dependencies initialized[39m[38;5;3m +6ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mMongooseModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mPassportModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mThrottlerModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mHttpModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mThrottlerModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigHostModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConfigModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mCacheModule dependencies initialized[39m[38;5;3m +11ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAppModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mJwtModule dependencies initialized[39m[38;5;3m +0ms[39m
+(node:85528) [MONGODB DRIVER] Warning: useNewUrlParser is a deprecated option: useNewUrlParser has no effect since Node.js Driver version 4.0.0 and will be removed in the next major version
+(node:85528) [MONGODB DRIVER] Warning: useUnifiedTopology is a deprecated option: useUnifiedTopology has no effect since Node.js Driver version 4.0.0 and will be removed in the next major version
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[CacheService] [39m[32mRedis connected[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mMongooseCoreModule dependencies initialized[39m[38;5;3m +4ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mMongooseModule dependencies initialized[39m[38;5;3m +3ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mMongooseModule dependencies initialized[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[AIAgentService] [39m[32mAI Agent Service initialized with URL: http://localhost:8000, API Key: configured, Service Name: tenderly-backend[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mConsultationModule dependencies initialized[39m[38;5;3m +1ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[InstanceLoader] [39m[32mAuthModule dependencies initialized[39m[38;5;3m +0ms[39m
+📚 Swagger docs available at: http://localhost:3000/api/v1/docs
+✅ Default doctor shifts initialized
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAppController {/api/v1}:[39m[38;5;3m +65ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/health, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mAuthController {/api/v1/auth}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/register, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/login, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/refresh, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/logout, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/me, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/verify-email, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/forgot-password, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/reset-password, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/change-password, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/mfa/setup, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/mfa/verify-setup, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/mfa/generate-login-code, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/mfa, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/audit/me, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/sessions, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/sessions/:sessionId, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/auth/verify-device, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mConsultationController {/api/v1/consultations}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/:id, GET} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/patient/:patientId, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/:id, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/:id, DELETE} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/symptoms/collect, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/symptoms/collect_detailed_symptoms, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/select-consultation, POST} route[39m[38;5;3m +1ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/confirm-payment, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/:consultationId/clinical/:clinicalSessionId/detailed-symptoms, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/mock-payment/:sessionId, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/:id/investigations, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/health, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/ai-service/health, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/db-health, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/consultations/test-model, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RoutesResolver] [39m[32mDoctorShiftController {/api/v1/doctor-shifts}:[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/doctor-shifts, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/doctor-shifts, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/doctor-shifts/current-doctor, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/doctor-shifts/:shiftType/status, PATCH} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/doctor-shifts/initialize-defaults, POST} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[RouterExplorer] [39m[32mMapped {/api/v1/doctor-shifts/health, GET} route[39m[38;5;3m +0ms[39m
+[32m[Nest] 85528  - [39m27/07/2025, 8:03:54 pm [32m    LOG[39m [38;5;3m[NestApplication] [39m[32mNest application successfully started[39m[38;5;3m +3ms[39m
+🚀 Tenderly Backend running on: http://localhost:3000/api/v1
+🌍 Environment: development

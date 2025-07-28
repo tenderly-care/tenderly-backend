@@ -54,14 +54,16 @@ import {
   AIAgentSymptomCollectionDto,
   AIDiagnosisResponseDto,
   ClinicalDetailedSymptomsDto,
-  ClinicalDetailedSymptomsResponseDto
+  GynecologicalAssessmentDto,
+  StructuredDiagnosisResponseDto
 } from '../dto/consultation.dto';
 import { GetUser } from '../../../shared/decorators/get-user.decorator';
 import { Roles } from '../../../shared/decorators/roles.decorator';
-import { RolesGuard } from '../../../shared/guards/roles.guard';
-import { JwtAuthGuard } from '../../../shared/guards/jwt-auth.guard';
-import { Public } from '../../../shared/decorators/public.decorator';
 import { UserRole } from '../../users/schemas/user.schema';
+import { JwtAuthGuard } from '../../../shared/guards/jwt-auth.guard';
+import { RolesGuard } from '../../../shared/guards/roles.guard';
+import { Public } from '../../../shared/decorators/public.decorator';
+
 
 @ApiTags('Consultations')
 @ApiBearerAuth()
@@ -238,8 +240,8 @@ export class ConsultationController {
     };
   }
 
-  @Post('symptoms/collect')
-  @ApiOperation({ 
+    @Post('symptoms/collect')
+  @ApiOperation({
     summary: 'AI Agent Compatible Symptom Collection',
     description: 'Collects symptoms in the exact format expected by tenderly-ai-agent and returns AI diagnosis with consultation recommendations'
   })
@@ -308,46 +310,125 @@ export class ConsultationController {
     );
   }
 
-  @Post('symptoms/collect_detailed_symptoms')
-  @ApiOperation({ 
-    summary: 'Detailed symptom collection for comprehensive AI diagnosis',
-    description: 'Collects comprehensive patient data and returns detailed AI diagnosis with medication safety checks and investigations'
+  @Post('symptoms/collect-structured')
+  @ApiOperation({
+    summary: 'Structured Gynecological Assessment',
+    description: 'Collects comprehensive gynecological symptoms and medical history for detailed AI diagnosis using structured assessment format'
   })
-  @ApiBody({ type: DetailedSymptomInputDto })
+  @ApiBody({ 
+    type: GynecologicalAssessmentDto,
+    description: 'Comprehensive gynecological assessment data matching tenderly-ai-agent structured schema',
+    examples: {
+      'Irregular Periods Assessment': {
+        value: {
+          patient_profile: {
+            age: 25,
+            request_id: "patient_123",
+            timestamp: "2025-01-28T10:30:00Z"
+          },
+          primary_complaint: {
+            main_symptom: "irregular periods",
+            duration: "3 months",
+            severity: "moderate",
+            onset: "gradual",
+            progression: "stable"
+          },
+          symptom_specific_details: {
+            symptom_characteristics: {
+              cycle_length_range: "21–45 days",
+              bleeding_duration_variability: "2–10 days",
+              bleeding_intensity: "sometimes heavy",
+              bleeding_between_periods: true,
+              skipped_periods: "twice in last 6 months",
+              associated_symptoms: ["severe cramps", "fatigue", "mood swings"],
+              recent_weight_changes: false,
+              known_causes: "none identified"
+            }
+          },
+          reproductive_history: {
+            pregnancy_status: {
+              could_be_pregnant: false,
+              pregnancy_test_result: "negative"
+            },
+            sexual_activity: {
+              sexually_active: true,
+              contraception_method: "condoms"
+            },
+            menstrual_history: {
+              menarche_age: 12,
+              cycle_frequency: 28,
+              period_duration: 5
+            }
+          },
+          associated_symptoms: {
+            pain: {
+              pelvic_pain: "mild",
+              vulvar_irritation: "none"
+            },
+            systemic: {
+              fatigue: "moderate",
+              nausea: false,
+              fever: false
+            }
+          },
+          medical_context: {
+            current_medications: [],
+            recent_medications: [],
+            medical_conditions: ["diabetes"],
+            previous_gynecological_issues: [],
+            allergies: ["penicillin"],
+            family_history: []
+          },
+          healthcare_interaction: {
+            previous_consultation: true,
+            consultation_outcome: "inconclusive",
+            investigations_done: false,
+            current_treatment: "none"
+          },
+          patient_concerns: {
+            main_worry: "fertility issues due to irregular periods",
+            impact_on_life: "moderate",
+            additional_notes: "Concerned about ability to conceive"
+          }
+        }
+      }
+    }
+  })
   @ApiResponse({ 
     status: HttpStatus.OK, 
-    description: 'Detailed AI diagnosis completed successfully with comprehensive analysis',
-    type: DetailedDiagnosisResponseDto
+    description: 'Structured diagnosis completed successfully',
+    type: StructuredDiagnosisResponseDto
   })
   @ApiResponse({ 
     status: HttpStatus.BAD_REQUEST, 
-    description: 'Invalid input data or missing required fields' 
+    description: 'Invalid input data - check required fields and data types' 
   })
   @ApiResponse({ 
     status: HttpStatus.SERVICE_UNAVAILABLE, 
     description: 'AI diagnosis service temporarily unavailable' 
   })
   @ApiResponse({ 
-    status: HttpStatus.CONFLICT, 
-    description: 'Patient ID mismatch or authentication issue'
+    status: HttpStatus.UNAUTHORIZED, 
+    description: 'Authentication required - patient role only' 
   })
   @Roles(UserRole.PATIENT)
-  async collectDetailedSymptoms(
-    @Body() detailedSymptomInputDto: DetailedSymptomInputDto,
+  async collectStructuredSymptoms(
+    @Body() assessmentData: GynecologicalAssessmentDto,
     @GetUser() user: any,
     @Req() req: Request
-  ): Promise<DetailedDiagnosisResponseDto> {
+  ): Promise<StructuredDiagnosisResponseDto & { sessionId: string; consultationPricing: any }> {
     const requestMetadata = {
       ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
       userAgent: req.headers['user-agent'] || 'unknown'
     };
 
-    return await this.consultationService.collectDetailedSymptoms(
+    return await this.consultationService.collectStructuredGynecologicalAssessment(
       user.id,
-      detailedSymptomInputDto,
+      assessmentData,
       requestMetadata
     );
   }
+
 
   @Post('select-consultation')
   @ApiOperation({ 
@@ -425,7 +506,7 @@ export class ConsultationController {
   @ApiResponse({ 
     status: HttpStatus.OK, 
     description: 'Detailed symptoms collected successfully and comprehensive AI diagnosis generated',
-    type: ClinicalDetailedSymptomsResponseDto
+    type: Object
   })
   @ApiResponse({ 
     status: HttpStatus.BAD_REQUEST, 
@@ -450,7 +531,7 @@ export class ConsultationController {
     @Body() detailedSymptomsDto: ClinicalDetailedSymptomsDto,
     @GetUser() user: any,
     @Req() req: Request
-  ): Promise<ClinicalDetailedSymptomsResponseDto> {
+  ): Promise<any> {
     const requestMetadata = {
       ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
       userAgent: req.headers['user-agent'] || 'unknown'
@@ -564,4 +645,5 @@ export class ConsultationController {
   async testConsultationModel() {
     return await this.consultationService.testConsultationModel();
   }
+
 }

@@ -49,8 +49,8 @@ export class Consultation {
   @Prop({ type: Types.ObjectId, ref: 'User', index: true })
   doctorId: Types.ObjectId;
 
-  @Prop({ required: true, type: Types.ObjectId, unique: true, index: true })
-  sessionId: Types.ObjectId;
+  @Prop({ required: true, type: String, unique: true, index: true })
+  consultationId: string; // Changed from sessionId to consultationId - unique consultation identifier
 
   @Prop({ 
     type: String, 
@@ -67,22 +67,24 @@ export class Consultation {
   })
   consultationType: ConsultationType;
 
-  // Detailed symptoms following new flexible structure
+  // Detailed symptoms matching tenderly-ai-agent JSON schema
   @Prop({ type: Object })
   @Encrypt()
   detailedSymptoms: {
+    patient_profile: {
+      age: number;
+      request_id: string; // patient_id
+      timestamp: string;
+    };
     primary_complaint: {
       main_symptom: string;
       duration: string;
-      severity: string;
+      severity: 'mild' | 'moderate' | 'severe';
       onset: string;
       progression: string;
     };
     symptom_specific_details: {
       symptom_characteristics: Record<string, any>;
-      filled_by: Types.ObjectId;
-      filled_at: Date;
-      schema_version?: string;
     };
     reproductive_history: {
       pregnancy_status: {
@@ -131,16 +133,54 @@ export class Consultation {
     };
   };
 
-  // Enhanced AI diagnosis with comprehensive details
+  // AI diagnosis - stores raw response from tenderly-ai-agent
   @Prop({ type: Object })
   @Encrypt()
-  aiDiagnosis: {
-    possible_diagnoses: string[];
+  aiDiagnosis: any; // Raw response from tenderly-ai-agent
+
+  // Structured diagnosis - stores comprehensive structured diagnosis response
+  @Prop({ type: Object })
+  @Encrypt()
+  structuredDiagnosis: {
+    request_id: string;
+    patient_age: number;
+    primary_symptom: string;
+    possible_diagnoses: Array<{
+      name: string;
+      confidence_score: number;
+      description?: string;
+    }>;
     clinical_reasoning: string;
-    recommended_investigations: string[];
+    differential_considerations: string[];
+    safety_assessment: {
+      allergy_considerations: {
+        allergic_medications: string[];
+        safe_alternatives: string[];
+        contraindicated_drugs: string[];
+      };
+      condition_interactions: string[];
+      safety_warnings: string[];
+    };
+    risk_assessment: {
+      urgency_level: 'low' | 'moderate' | 'high' | 'urgent';
+      red_flags: string[];
+      when_to_seek_emergency_care: string[];
+    };
+    recommended_investigations: Array<{
+      name: string;
+      priority: 'low' | 'medium' | 'high';
+      reason: string;
+    }>;
     treatment_recommendations: {
-      primary_treatment: string;
-      safe_medications: string[];
+      primary_treatment?: string;
+      safe_medications: Array<{
+        name: string;
+        dosage: string;
+        frequency: string;
+        duration: string;
+        reason: string;
+        notes?: string;
+      }>;
       lifestyle_modifications: string[];
       dietary_advice: string[];
       follow_up_timeline: string;
@@ -148,9 +188,9 @@ export class Consultation {
     patient_education: string[];
     warning_signs: string[];
     confidence_score: number;
-    processing_notes: string;
+    processing_notes: string[];
     disclaimer: string;
-    timestamp: Date;
+    timestamp: string;
   };
 
   // Reference to separate prescription documents
@@ -201,12 +241,12 @@ export class Consultation {
   @Prop({ type: Date })
   consultationEndTime: Date;
 
-  // Enhanced metadata
+  // Metadata for tracking
   @Prop({ type: Object })
   metadata: {
-    sessionId: Types.ObjectId;
+    consultationId: string;
     patientId: Types.ObjectId;
-    doctorId: Types.ObjectId;
+    doctorId?: Types.ObjectId;
     ipAddress?: string;
     userAgent?: string;
     location?: string;
@@ -223,7 +263,7 @@ export class Consultation {
   @Prop({ type: [Types.ObjectId], ref: 'Consultation', default: [] })
   followUpConsultations: Types.ObjectId[];
 
-  // Audit and compliance
+  // Soft delete
   @Prop({ default: false })
   isDeleted: boolean;
 
@@ -236,36 +276,9 @@ export class Consultation {
 
 export const ConsultationSchema = SchemaFactory.createForClass(Consultation);
 
-// Indexes for efficient queries
-ConsultationSchema.index({ patientId: 1, createdAt: -1 });
-ConsultationSchema.index({ doctorId: 1, createdAt: -1 });
-ConsultationSchema.index({ sessionId: 1 }, { unique: true });
-ConsultationSchema.index({ status: 1 });
-ConsultationSchema.index({ parentConsultationId: 1 });
-ConsultationSchema.index({ consultationType: 1 });
-ConsultationSchema.index({ 'detailedSymptoms.primary_complaint.main_symptom': 'text' });
-ConsultationSchema.index({ 'aiDiagnosis.possible_diagnoses': 1 });
-ConsultationSchema.index({ consultationStartTime: -1 });
-ConsultationSchema.index({ isDeleted: 1 });
-
-// Pre-save middleware to handle status history
-ConsultationSchema.pre('save', function(this: ConsultationDocument) {
-  // Track status changes
-  if (this.isModified('status')) {
-    if (!this.statusHistory) this.statusHistory = [];
-    this.statusHistory.push({
-      status: this.status,
-      changedAt: new Date(),
-      changedBy: this.doctorId || this.patientId, // Default to appropriate user
-    });
-  }
-  
-  // Ensure metadata consistency
-  if (!this.metadata) {
-    this.metadata = {
-      sessionId: this.sessionId,
-      patientId: this.patientId,
-      doctorId: this.doctorId,
-    };
-  }
-});
+// Indexes for performance
+ConsultationSchema.index({ patientId: 1, status: 1 });
+ConsultationSchema.index({ consultationId: 1 }, { unique: true });
+ConsultationSchema.index({ doctorId: 1, status: 1 });
+ConsultationSchema.index({ createdAt: -1 });
+ConsultationSchema.index({ updatedAt: -1 });

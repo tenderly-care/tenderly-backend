@@ -96,7 +96,7 @@ export default () => ({
     },
     diagnosis: {
       baseUrl: process.env.AI_DIAGNOSIS_URL || 'http://localhost:8000',
-      apiKey: process.env.AI_DIAGNOSIS_API_KEY || 'dev-api-key-change-in-production',
+      apiKey: process.env.AI_DIAGNOSIS_API_KEY || 'tenderly-api-key-2024-production-change-this',
       secretKey: process.env.AI_DIAGNOSIS_SECRET_KEY || 'development_jwt_secret_key_change_in_production',
       serviceName: process.env.AI_SERVICE_NAME || 'tenderly-backend',
       timeout: parseInt(process.env.AI_DIAGNOSIS_TIMEOUT || '30000', 10), // 30 seconds
