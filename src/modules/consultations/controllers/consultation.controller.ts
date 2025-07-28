@@ -4,95 +4,75 @@ import {
   Post, 
   Body, 
   Param, 
-  Patch, 
-  Delete, 
   Query, 
-  Req, 
-  HttpStatus,
-  UseGuards,
-  UseInterceptors,
-  UsePipes,
-  ValidationPipe,
+  UseGuards, 
+  Req,
+  Patch,
+  Delete,
   ParseIntPipe,
-  DefaultValuePipe
+  DefaultValuePipe,
+  BadRequestException,
+  NotFoundException,
+  HttpStatus
 } from '@nestjs/common';
 import { 
   ApiTags, 
   ApiOperation, 
   ApiResponse, 
-  ApiBearerAuth, 
+  ApiBody, 
   ApiParam, 
-  ApiQuery,
-  ApiBody,
-  ApiConsumes,
-  ApiProduces 
+  ApiQuery 
 } from '@nestjs/swagger';
-import { Request } from 'express';
-import { ThrottlerGuard } from '@nestjs/throttler';
-import { ConsultationService } from '../services/consultation.service';
-// New DTOs
-import { 
-  CreateConsultationDto as NewCreateConsultationDto,
-  UpdateConsultationStatusDto,
-  CreatePatientProfileDto, 
-  CreateSymptomScreeningDto, 
-  ConsultationResponseDto, 
-  PrescriptionResponseDto 
-} from '../dto/new-consultation.dto';
-// Legacy DTOs for backward compatibility
-import { 
-  CreateConsultationDto, 
-  UpdateConsultationDto, 
-  SymptomInputDto,
-  BasicSymptomInputDto,
-  StructuredSymptomRequestDto,
-  DetailedSymptomInputDto,
-  DetailedDiagnosisResponseDto,
-  ConsultationSelectionDto,
-  PaymentConfirmationDto,
-  DoctorInvestigationDto,
-  AIAgentSymptomCollectionDto,
-  AIDiagnosisResponseDto,
-  ClinicalDetailedSymptomsDto,
-  GynecologicalAssessmentDto,
-  StructuredDiagnosisResponseDto
-} from '../dto/consultation.dto';
-import { GetUser } from '../../../shared/decorators/get-user.decorator';
-import { Roles } from '../../../shared/decorators/roles.decorator';
-import { UserRole } from '../../users/schemas/user.schema';
 import { JwtAuthGuard } from '../../../shared/guards/jwt-auth.guard';
 import { RolesGuard } from '../../../shared/guards/roles.guard';
+import { Roles } from '../../../shared/decorators/roles.decorator';
+import { GetUser } from '../../../shared/decorators/get-user.decorator';
 import { Public } from '../../../shared/decorators/public.decorator';
-
+import { ConsultationService } from '../services/consultation.service';
+import { 
+  CreateConsultationDto, 
+  UpdateConsultationStatusDto 
+} from '../dto/new-consultation.dto';
+import { 
+  AIAgentSymptomCollectionDto, 
+  AIDiagnosisResponseDto,
+  GynecologicalAssessmentDto,
+  StructuredDiagnosisResponseDto,
+  PaymentConfirmationDto
+} from '../dto/consultation.dto';
+import { ConsultationStatus, ConsultationType } from '../schemas/consultation.schema';
+import { UserRole } from '../../users/schemas/user.schema';
+import { Request } from 'express';
+import { ThrottlerGuard } from '@nestjs/throttler';
+import { UsePipes, ValidationPipe } from '@nestjs/common';
+import { UseInterceptors } from '@nestjs/common';
+import { Logger } from '@nestjs/common';
 
 @ApiTags('Consultations')
-@ApiBearerAuth()
 @UseGuards(JwtAuthGuard, RolesGuard, ThrottlerGuard)
 @UsePipes(new ValidationPipe({ transform: true, whitelist: true }))
 @Controller('consultations')
 export class ConsultationController {
+  private readonly logger = new Logger(ConsultationController.name);
+
   constructor(private readonly consultationService: ConsultationService) {}
 
   @Post()
   @ApiOperation({ 
     summary: 'Create a new consultation',
-    description: 'Creates a new consultation session for a patient after symptom collection and payment confirmation'
+    description: 'Creates a new consultation for the authenticated patient'
   })
   @ApiResponse({ 
     status: HttpStatus.CREATED, 
-    description: 'Consultation created successfully'
-  })
-  @ApiResponse({ 
-    status: HttpStatus.BAD_REQUEST, 
-    description: 'Invalid input data' 
+    description: 'Consultation created successfully' 
   })
   @ApiResponse({ 
     status: HttpStatus.CONFLICT, 
     description: 'Patient already has an active consultation' 
   })
-  @ApiBody({ type: NewCreateConsultationDto })
+  @ApiBody({ type: CreateConsultationDto })
   async createConsultation(
-    @Body() createConsultationDto: NewCreateConsultationDto,
+    @Body() createConsultationDto: CreateConsultationDto,
     @GetUser() user: any,
     @Req() req: Request
   ) {
@@ -103,201 +83,116 @@ export class ConsultationController {
 
     return await this.consultationService.createConsultation(
       createConsultationDto,
-      requestMetadata
+      user.id
     );
   }
 
   @Get(':id')
   @ApiOperation({ 
     summary: 'Get consultation by ID',
-    description: 'Retrieves a specific consultation by its ID with proper access control'
+    description: 'Retrieves a specific consultation by its ID'
   })
-  @ApiParam({ 
-    name: 'id', 
-    type: 'string', 
-    description: 'Consultation ID'
-  })
+  @ApiParam({ name: 'id', description: 'Consultation ID' })
   @ApiResponse({ 
     status: HttpStatus.OK, 
     description: 'Consultation retrieved successfully' 
   })
-  async findConsultationById(
-    @Param('id') consultationId: string,
-    @GetUser() user: any
-  ) {
-    return await this.consultationService.findConsultationById(
-      consultationId,
-      user.id,
-      user.roles
-    );
+  @ApiResponse({ 
+    status: HttpStatus.NOT_FOUND, 
+    description: 'Consultation not found' 
+  })
+  async getConsultation(@Param('id') id: string, @GetUser() user: any) {
+    return await this.consultationService.findConsultationById(id, user.id);
   }
 
   @Get('patient/:patientId')
   @ApiOperation({ 
-    summary: 'Get all consultations for a patient',
-    description: 'Retrieves paginated list of consultations for a specific patient'
+    summary: 'Get consultations by patient ID',
+    description: 'Retrieves all consultations for a specific patient'
   })
-  @ApiParam({ 
-    name: 'patientId', 
-    type: 'string', 
-    description: 'Patient ID'
+  @ApiParam({ name: 'patientId', description: 'Patient ID' })
+  @ApiQuery({ name: 'page', required: false, type: Number })
+  @ApiQuery({ name: 'limit', required: false, type: Number })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Consultations retrieved successfully' 
   })
-  @ApiQuery({ 
-    name: 'limit', 
-    type: 'number', 
-    required: false, 
-    description: 'Number of consultations to retrieve'
-  })
-  @ApiQuery({ 
-    name: 'offset', 
-    type: 'number', 
-    required: false, 
-    description: 'Number of consultations to skip'
-  })
-  async findConsultationsByPatientId(
+  async getConsultationsByPatientId(
     @Param('patientId') patientId: string,
+    @Query('page', new DefaultValuePipe(1), ParseIntPipe) page: number,
     @Query('limit', new DefaultValuePipe(10), ParseIntPipe) limit: number,
-    @Query('offset', new DefaultValuePipe(0), ParseIntPipe) offset: number,
     @GetUser() user: any
   ) {
-    const result = await this.consultationService.findConsultationsByPatientId(
+    return await this.consultationService.findConsultationsByPatientId(
       patientId,
       user.id,
       limit,
-      offset
+      (page - 1) * limit
     );
-
-    return {
-      ...result,
-      limit,
-      offset
-    };
   }
 
   @Patch(':id')
   @ApiOperation({ 
     summary: 'Update consultation',
-    description: 'Updates a consultation with new information'
+    description: 'Updates an existing consultation'
   })
-  @ApiParam({ 
-    name: 'id', 
-    type: 'string', 
-    description: 'Consultation ID'
+  @ApiParam({ name: 'id', description: 'Consultation ID' })
+  @ApiBody({ type: CreateConsultationDto })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Consultation updated successfully' 
   })
-  @ApiBody({ type: UpdateConsultationDto })
-  @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @ApiResponse({ 
+    status: HttpStatus.NOT_FOUND, 
+    description: 'Consultation not found' 
+  })
   async updateConsultation(
-    @Param('id') consultationId: string,
-    @Body() updateConsultationDto: UpdateConsultationDto,
-    @GetUser() user: any,
-    @Req() req: Request
+    @Param('id') id: string,
+    @Body() updateConsultationDto: CreateConsultationDto,
+    @GetUser() user: any
   ) {
-    const requestMetadata = {
-      ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
-      userAgent: req.headers['user-agent'] || 'unknown'
-    };
-
     return await this.consultationService.updateConsultation(
-      consultationId,
+      id,
       updateConsultationDto,
-      user.id,
-      requestMetadata,
-      user.roles
+      user.id
     );
   }
 
   @Delete(':id')
   @ApiOperation({ 
-    summary: 'Cancel consultation',
-    description: 'Cancels a consultation (soft delete)'
+    summary: 'Delete consultation',
+    description: 'Soft deletes a consultation'
   })
-  @ApiParam({ 
-    name: 'id', 
-    type: 'string', 
-    description: 'Consultation ID'
-  })
-  @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  async cancelConsultation(
-    @Param('id') consultationId: string,
-    @GetUser() user: any,
-    @Req() req: Request
-  ) {
-    const requestMetadata = {
-      ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
-      userAgent: req.headers['user-agent'] || 'unknown'
-    };
-
-    await this.consultationService.deleteConsultation(
-      consultationId,
-      user.id,
-      requestMetadata,
-      user.roles
-    );
-
-    return {
-      message: 'Consultation cancelled successfully',
-      consultationId
-    };
-  }
-
-    @Post('symptoms/collect')
-  @ApiOperation({
-    summary: 'AI Agent Compatible Symptom Collection',
-    description: 'Collects symptoms in the exact format expected by tenderly-ai-agent and returns AI diagnosis with consultation recommendations'
-  })
-  @ApiBody({ 
-    type: AIAgentSymptomCollectionDto,
-    description: 'Symptom data in AI agent compatible format - matches tenderly-ai-agent schema',
-    examples: {
-      'Urinary Infection Symptoms': {
-        value: {
-          diagnosis_request: {
-            symptoms: ['urinary infection', 'burn during urination'],
-            patient_age: 34,
-            severity_level: 'severe',
-            duration: '3 days',
-            onset: 'sudden',
-            progression: 'stable'
-          }
-        }
-      },
-      'Vaginal Discharge Symptoms': {
-        value: {
-          diagnosis_request: {
-            symptoms: ['vaginal discharge', 'itching', 'burning sensation'],
-            patient_age: 25,
-            severity_level: 'moderate',
-            duration: '5 days',
-            onset: 'gradual',
-            progression: 'worsening'
-          }
-        }
-      }
-    }
-  })
+  @ApiParam({ name: 'id', description: 'Consultation ID' })
   @ApiResponse({ 
     status: HttpStatus.OK, 
-    description: 'AI diagnosis completed successfully',
+    description: 'Consultation deleted successfully' 
+  })
+  @ApiResponse({ 
+    status: HttpStatus.NOT_FOUND, 
+    description: 'Consultation not found' 
+  })
+  async deleteConsultation(@Param('id') id: string, @GetUser() user: any) {
+    return await this.consultationService.deleteConsultation(id, user.id);
+  }
+
+  @Post('symptoms/collect')
+  @ApiOperation({ 
+    summary: 'Collect symptoms for AI diagnosis',
+    description: 'Collects patient symptoms and returns AI diagnosis'
+  })
+  @ApiBody({ type: AIAgentSymptomCollectionDto })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Symptoms collected and diagnosis generated',
     type: AIDiagnosisResponseDto
-  })
-  @ApiResponse({ 
-    status: HttpStatus.BAD_REQUEST, 
-    description: 'Invalid input data - check symptoms array length (1-3 items) and patient age (12-100)' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.SERVICE_UNAVAILABLE, 
-    description: 'AI diagnosis service temporarily unavailable' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.UNAUTHORIZED, 
-    description: 'Authentication required - patient role only' 
   })
   @Roles(UserRole.PATIENT)
   async collectSymptoms(
-    @Body() symptomData: AIAgentSymptomCollectionDto,
+    @Body() symptomCollectionDto: AIAgentSymptomCollectionDto,
     @GetUser() user: any,
     @Req() req: Request
-  ): Promise<AIDiagnosisResponseDto & { sessionId: string; consultationPricing: any }> {
+  ): Promise<AIDiagnosisResponseDto> {
     const requestMetadata = {
       ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
       userAgent: req.headers['user-agent'] || 'unknown'
@@ -305,151 +200,89 @@ export class ConsultationController {
 
     return await this.consultationService.collectAIAgentSymptoms(
       user.id,
-      symptomData,
+      symptomCollectionDto,
       requestMetadata
     );
   }
 
   @Post('symptoms/collect-structured')
-  @ApiOperation({
-    summary: 'Structured Gynecological Assessment',
-    description: 'Collects comprehensive gynecological symptoms and medical history for detailed AI diagnosis using structured assessment format'
+  @ApiOperation({ 
+    summary: 'Collect structured gynecological symptoms',
+    description: 'Collects detailed structured symptoms for gynecological assessment'
   })
   @ApiBody({ 
-    type: GynecologicalAssessmentDto,
-    description: 'Comprehensive gynecological assessment data matching tenderly-ai-agent structured schema',
-    examples: {
-      'Irregular Periods Assessment': {
-        value: {
-          patient_profile: {
-            age: 25,
-            request_id: "patient_123",
-            timestamp: "2025-01-28T10:30:00Z"
-          },
-          primary_complaint: {
-            main_symptom: "irregular periods",
-            duration: "3 months",
-            severity: "moderate",
-            onset: "gradual",
-            progression: "stable"
-          },
-          symptom_specific_details: {
-            symptom_characteristics: {
-              cycle_length_range: "21–45 days",
-              bleeding_duration_variability: "2–10 days",
-              bleeding_intensity: "sometimes heavy",
-              bleeding_between_periods: true,
-              skipped_periods: "twice in last 6 months",
-              associated_symptoms: ["severe cramps", "fatigue", "mood swings"],
-              recent_weight_changes: false,
-              known_causes: "none identified"
-            }
-          },
-          reproductive_history: {
-            pregnancy_status: {
-              could_be_pregnant: false,
-              pregnancy_test_result: "negative"
-            },
-            sexual_activity: {
-              sexually_active: true,
-              contraception_method: "condoms"
-            },
-            menstrual_history: {
-              menarche_age: 12,
-              cycle_frequency: 28,
-              period_duration: 5
-            }
-          },
-          associated_symptoms: {
-            pain: {
-              pelvic_pain: "mild",
-              vulvar_irritation: "none"
-            },
-            systemic: {
-              fatigue: "moderate",
-              nausea: false,
-              fever: false
-            }
-          },
-          medical_context: {
-            current_medications: [],
-            recent_medications: [],
-            medical_conditions: ["diabetes"],
-            previous_gynecological_issues: [],
-            allergies: ["penicillin"],
-            family_history: []
-          },
-          healthcare_interaction: {
-            previous_consultation: true,
-            consultation_outcome: "inconclusive",
-            investigations_done: false,
-            current_treatment: "none"
-          },
-          patient_concerns: {
-            main_worry: "fertility issues due to irregular periods",
-            impact_on_life: "moderate",
-            additional_notes: "Concerned about ability to conceive"
-          }
-        }
-      }
+    schema: {
+      type: 'object',
+      properties: {
+        clinicalSessionId: { type: 'string', description: 'Clinical session ID (optional, will auto-detect if not provided)' }
+      },
+      additionalProperties: true
     }
   })
   @ApiResponse({ 
     status: HttpStatus.OK, 
-    description: 'Structured diagnosis completed successfully',
+    description: 'Structured assessment completed',
     type: StructuredDiagnosisResponseDto
-  })
-  @ApiResponse({ 
-    status: HttpStatus.BAD_REQUEST, 
-    description: 'Invalid input data - check required fields and data types' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.SERVICE_UNAVAILABLE, 
-    description: 'AI diagnosis service temporarily unavailable' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.UNAUTHORIZED, 
-    description: 'Authentication required - patient role only' 
   })
   @Roles(UserRole.PATIENT)
   async collectStructuredSymptoms(
-    @Body() assessmentData: GynecologicalAssessmentDto,
+    @Body() body: any,
     @GetUser() user: any,
     @Req() req: Request
-  ): Promise<StructuredDiagnosisResponseDto & { sessionId: string; consultationPricing: any }> {
+  ): Promise<StructuredDiagnosisResponseDto & { consultationId: string; clinicalSessionId: string; consultationPricing: any; paymentVerified: boolean }> {
     const requestMetadata = {
       ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
       userAgent: req.headers['user-agent'] || 'unknown'
     };
+    const { clinicalSessionId, ...assessmentData } = body;
+
+    let sessionClinicalSessionId = clinicalSessionId;
+    if (!sessionClinicalSessionId) {
+      const recentConsultation = await this.consultationService.findConsultationsByPatientId(user.id, user.id, 1, 0);
+      console.log('Recent consultations found:', recentConsultation.consultations.length);
+
+      if (recentConsultation.consultations.length > 0) {
+        const latestConsultation = recentConsultation.consultations[0];
+        console.log('Latest consultation:', {
+          consultationId: latestConsultation.consultationId,
+          clinicalSessionId: latestConsultation.clinicalSessionId,
+          paymentStatus: latestConsultation.paymentInfo?.paymentStatus,
+          status: latestConsultation.status
+        });
+
+        if (latestConsultation.clinicalSessionId &&
+            latestConsultation.paymentInfo?.paymentStatus === 'completed' &&
+            latestConsultation.status === ConsultationStatus.PAYMENT_CONFIRMED) {
+          sessionClinicalSessionId = latestConsultation.clinicalSessionId;
+          console.log('Using clinicalSessionId from latest consultation:', sessionClinicalSessionId);
+        } else {
+          console.log('Latest consultation does not meet criteria:', {
+            hasClinicalSessionId: !!latestConsultation.clinicalSessionId,
+            paymentStatus: latestConsultation.paymentInfo?.paymentStatus,
+            consultationStatus: latestConsultation.status
+          });
+        }
+      } else {
+        console.log('No recent consultations found for user:', user.id);
+      }
+    }
+
+    if (!sessionClinicalSessionId) {
+      const recentConsultation = await this.consultationService.findConsultationsByPatientId(user.id, user.id, 5, 0);
+      let errorDetails = 'No consultations found.';
+
+      if (recentConsultation.consultations.length > 0) {
+        const latest = recentConsultation.consultations[0];
+        errorDetails = `Found consultation ${latest.consultationId} with status: ${latest.status}, payment: ${latest.paymentInfo?.paymentStatus}, clinicalSessionId: ${latest.clinicalSessionId || 'missing'}`;
+      }
+
+      throw new BadRequestException(`clinicalSessionId is required. ${errorDetails} Please complete payment confirmation first to get your clinicalSessionId.`);
+    }
 
     return await this.consultationService.collectStructuredGynecologicalAssessment(
       user.id,
       assessmentData,
-      requestMetadata
-    );
-  }
-
-
-  @Post('select-consultation')
-  @ApiOperation({ 
-    summary: 'Select consultation type and initiate payment',
-    description: 'Patient selects consultation type and gets payment details'
-  })
-  @ApiBody({ type: ConsultationSelectionDto })
-  @Roles(UserRole.PATIENT)
-  async selectConsultationType(
-    @Body() consultationSelectionDto: ConsultationSelectionDto,
-    @GetUser() user: any,
-    @Req() req: Request
-  ) {
-    const requestMetadata = {
-      ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
-      userAgent: req.headers['user-agent'] || 'unknown'
-    };
-
-    return await this.consultationService.selectConsultationType(
-      consultationSelectionDto,
-      user.id,
+      sessionClinicalSessionId,
       requestMetadata
     );
   }
@@ -478,104 +311,123 @@ export class ConsultationController {
     );
   }
 
-  /**
-   * Phase 2: Collect detailed symptoms for clinical assessment
-   * Production-level endpoint for comprehensive symptom collection after payment confirmation
-   */
-  @Post(':consultationId/clinical/:clinicalSessionId/detailed-symptoms')
-  @ApiOperation({
-    summary: 'Phase 2: Collect detailed symptoms for clinical assessment',
-    description: 'Collects comprehensive symptom data after payment confirmation for detailed AI analysis and doctor review. This endpoint is called after successful payment to gather detailed clinical information for professional medical assessment.'
-  })
-  @ApiParam({ 
-    name: 'consultationId', 
-    description: 'Consultation ID from Phase 1 payment confirmation',
-    type: 'string',
-    required: true
-  })
-  @ApiParam({ 
-    name: 'clinicalSessionId', 
-    description: 'Clinical session ID for Phase 2 data collection',
-    type: 'string',
-    required: true
+  @Post('debug-payment')
+  @Public()
+  async debugPayment(@Body() debugData: { sessionId: string; paymentId: string }) {
+    try {
+      this.logger.log(`Debug payment request: ${JSON.stringify(debugData)}`);
+      
+      // Check if payment exists in cache
+      const paymentService = this.consultationService['paymentService'];
+      const cachedPayment = await paymentService.getPaymentBySessionId(debugData.sessionId);
+      
+      // Check if session data exists
+      const sessionData = await this.consultationService['getTemporaryConsultationData'](debugData.sessionId);
+      
+      return {
+        success: true,
+        debug: {
+          sessionId: debugData.sessionId,
+          paymentId: debugData.paymentId,
+          cachedPayment: cachedPayment ? 'EXISTS' : 'NOT_FOUND',
+          sessionData: sessionData ? 'EXISTS' : 'NOT_FOUND',
+          paymentDetails: cachedPayment,
+          sessionDetails: sessionData ? { hasData: true, keys: Object.keys(sessionData) } : null
+        }
+      };
+    } catch (error) {
+      this.logger.error(`Debug payment error: ${error.message}`, error.stack);
+      return {
+        success: false,
+        error: error.message,
+        stack: error.stack
+      };
+    }
+  }
+
+  @Post('select-consultation')
+  @ApiOperation({ 
+    summary: 'Select consultation type and initiate payment',
+    description: 'Patient selects consultation type and gets payment details'
   })
   @ApiBody({ 
-    type: ClinicalDetailedSymptomsDto,
-    description: 'Comprehensive symptom data including primary complaint, associated symptoms, medical history, reproductive history, lifestyle factors, and patient concerns for clinical assessment'
-  })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
-    description: 'Detailed symptoms collected successfully and comprehensive AI diagnosis generated',
-    type: Object
-  })
-  @ApiResponse({ 
-    status: HttpStatus.BAD_REQUEST, 
-    description: 'Invalid symptom data, consultation not ready for clinical assessment, or clinical session phase mismatch' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.UNAUTHORIZED, 
-    description: 'Authentication required - patient role only' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.NOT_FOUND, 
-    description: 'Consultation or clinical session not found or expired' 
-  })
-  @ApiResponse({ 
-    status: HttpStatus.INTERNAL_SERVER_ERROR, 
-    description: 'Internal server error during symptom processing or AI diagnosis generation' 
+    schema: {
+      type: 'object',
+      properties: {
+        sessionId: { type: 'string', description: 'Session ID' },
+        selectedConsultationType: { 
+          type: 'string', 
+          enum: ['chat', 'video', 'tele', 'emergency', 'follow_up', 'structured_assessment'],
+          description: 'Type of consultation selected'
+        }
+      },
+      required: ['sessionId', 'selectedConsultationType']
+    }
   })
   @Roles(UserRole.PATIENT)
-  async collectDetailedSymptomsForConsultation(
+  async selectConsultationType(
+    @Body() body: { sessionId: string; selectedConsultationType: string },
+    @GetUser() user: any,
+    @Req() req: Request
+  ) {
+    const requestMetadata = {
+      ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+      userAgent: req.headers['user-agent'] || 'unknown'
+    };
+
+    return await this.consultationService.selectConsultationType(
+      body,
+      user.id,
+      requestMetadata
+    );
+  }
+
+  @Get('conflicts')
+  @ApiOperation({ 
+    summary: 'Check consultation conflicts',
+    description: 'Check if patient has any consultation conflicts (active, pending payment, expired)'
+  })
+  @Roles(UserRole.PATIENT)
+  async checkConflicts(@GetUser() user: any) {
+    return await this.consultationService.checkConsultationConflicts(user.id);
+  }
+
+  @Get('stats')
+  @ApiOperation({ 
+    summary: 'Get consultation statistics',
+    description: 'Get consultation statistics for the current patient'
+  })
+  @Roles(UserRole.PATIENT)
+  async getConsultationStats(@GetUser() user: any) {
+    return await this.consultationService.getPatientConsultationStats(user.id);
+  }
+
+  @Get('active')
+  @ApiOperation({ 
+    summary: 'Get active consultation',
+    description: 'Get the currently active consultation for the patient'
+  })
+  @Roles(UserRole.PATIENT)
+  async getActiveConsultation(@GetUser() user: any) {
+    const activeConsultation = await this.consultationService.getActiveConsultation(user.id);
+    
+    if (!activeConsultation) {
+      throw new NotFoundException('No active consultation found');
+    }
+    
+    return activeConsultation;
+  }
+
+  @Patch(':consultationId/status')
+  @ApiOperation({ 
+    summary: 'Update consultation status',
+    description: 'Update consultation status with proper business logic validation'
+  })
+  @ApiBody({ type: UpdateConsultationStatusDto })
+  @Roles(UserRole.PATIENT, UserRole.HEALTHCARE_PROVIDER, UserRole.ADMIN)
+  async updateConsultationStatus(
     @Param('consultationId') consultationId: string,
-    @Param('clinicalSessionId') clinicalSessionId: string,
-    @Body() detailedSymptomsDto: ClinicalDetailedSymptomsDto,
-    @GetUser() user: any,
-    @Req() req: Request
-  ): Promise<any> {
-    const requestMetadata = {
-      ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
-      userAgent: req.headers['user-agent'] || 'unknown'
-    };
-
-    return await this.consultationService.collectDetailedSymptomsForConsultation(
-      consultationId,
-      clinicalSessionId,
-      detailedSymptomsDto,
-      user.id,
-      requestMetadata
-    );
-  }
-
-  @Post('mock-payment/:sessionId')
-  @ApiOperation({ 
-    summary: 'Mock payment completion for testing',
-    description: 'Simulates payment completion for testing purposes'
-  })
-  @ApiParam({ name: 'sessionId', type: 'string', description: 'Session ID' })
-  @Roles(UserRole.PATIENT)
-  async mockPayment(
-    @Param('sessionId') sessionId: string,
-    @Body() mockData: { success?: boolean },
-    @GetUser() user: any
-  ) {
-    return await this.consultationService.mockPaymentCompletion(
-      sessionId,
-      user.id,
-      mockData.success ?? true
-    );
-  }
-
-  @Patch(':id/investigations')
-  @ApiOperation({ 
-    summary: 'Add doctor investigations and updates',
-    description: 'Allows doctors to add investigations and update consultation details'
-  })
-  @ApiParam({ name: 'id', type: 'string', description: 'Consultation ID' })
-  @ApiBody({ type: DoctorInvestigationDto })
-  @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.ADMIN, UserRole.SUPER_ADMIN)
-  async addInvestigations(
-    @Param('id') consultationId: string,
-    @Body() investigationDto: DoctorInvestigationDto,
+    @Body() updateStatusDto: UpdateConsultationStatusDto,
     @GetUser() user: any,
     @Req() req: Request
   ) {
@@ -584,66 +436,155 @@ export class ConsultationController {
       userAgent: req.headers['user-agent'] || 'unknown'
     };
 
-    return await this.consultationService.addDoctorInvestigations(
+    await this.consultationService.updateConsultationStatus(
       consultationId,
-      investigationDto,
+      updateStatusDto.status,
       user.id,
-      requestMetadata
+      updateStatusDto.reason,
+      {
+        source: 'api',
+        trigger: 'manual_status_update',
+        notes: updateStatusDto.notes
+      }
     );
+
+    return {
+      message: 'Consultation status updated successfully',
+      consultationId,
+      newStatus: updateStatusDto.status,
+      updatedAt: new Date()
+    };
   }
 
+  @Post(':consultationId/cancel')
+  @ApiOperation({ 
+    summary: 'Cancel consultation',
+    description: 'Cancel an active consultation'
+  })
+  @ApiBody({ 
+    schema: {
+      type: 'object',
+      properties: {
+        reason: { type: 'string', description: 'Reason for cancellation' }
+      }
+    }
+  })
+  @Roles(UserRole.PATIENT, UserRole.HEALTHCARE_PROVIDER, UserRole.ADMIN)
+  async cancelConsultation(
+    @Param('consultationId') consultationId: string,
+    @Body() cancelDto: { reason?: string },
+    @GetUser() user: any,
+    @Req() req: Request
+  ) {
+    const requestMetadata = {
+      ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+      userAgent: req.headers['user-agent'] || 'unknown'
+    };
+
+    await this.consultationService.updateConsultationStatus(
+      consultationId,
+      ConsultationStatus.CANCELLED,
+      user.id,
+      cancelDto.reason || 'Cancelled by user',
+      {
+        source: 'api',
+        trigger: 'manual_cancellation',
+        notes: 'Consultation cancelled by user'
+      }
+    );
+
+    return {
+      message: 'Consultation cancelled successfully',
+      consultationId,
+      cancelledAt: new Date()
+    };
+  }
+
+  // Health check endpoints
   @Get('health')
   @Public()
-  @ApiOperation({ 
-    summary: 'Health check for consultation service'
-  })
+  @ApiOperation({ summary: 'Consultation service health check' })
   async healthCheck() {
-    return {
-      status: 'healthy',
-      service: 'consultation-service',
-      timestamp: new Date().toISOString(),
-      version: '1.0.0'
-    };
+    return { status: 'healthy', timestamp: new Date().toISOString() };
   }
 
   @Get('ai-service/health')
   @Public()
-  @ApiOperation({
-    summary: 'Health check for AI service with JWT authentication test',
-    description: 'Tests AI service connectivity and JWT token generation'
-  })
-  @ApiResponse({
-    status: HttpStatus.OK,
-    description: 'AI service health status with authentication details'
-  })
-  async checkAIServiceHealth() {
+  @ApiOperation({ summary: 'AI service health check' })
+  async aiServiceHealthCheck() {
     return await this.consultationService.checkAIServiceHealth();
   }
 
   @Get('db-health')
-  @ApiOperation({ 
-    summary: 'Database health check',
-    description: 'Check if the database connection is working properly'
-  })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
-    description: 'Database health check completed'
-  })
-  async checkDatabaseHealth() {
+  @Public()
+  @ApiOperation({ summary: 'Database health check' })
+  async dbHealthCheck() {
     return await this.consultationService.checkDatabaseHealth();
   }
 
   @Get('test-model')
-  @ApiOperation({ 
-    summary: 'Test consultation model',
-    description: 'Test if the consultation model is working properly'
-  })
-  @ApiResponse({ 
-    status: HttpStatus.OK, 
-    description: 'Model test completed'
-  })
-  async testConsultationModel() {
+  @Public()
+  @ApiOperation({ summary: 'Test AI model' })
+  async testModel() {
     return await this.consultationService.testConsultationModel();
   }
 
+  @Post('mock-payment/:sessionId')
+  @ApiOperation({ 
+    summary: 'Create mock payment for testing',
+    description: 'Creates a mock payment for the given session ID (testing only)'
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID for payment' })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Mock payment created successfully' 
+  })
+  @Roles(UserRole.PATIENT)
+  async createMockPayment(
+    @Param('sessionId') sessionId: string,
+    @GetUser() user: any,
+    @Req() req: Request
+  ) {
+    const requestMetadata = {
+      ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+      userAgent: req.headers['user-agent'] || 'unknown'
+    };
+
+    return await this.consultationService.createMockPayment(
+      sessionId,
+      user.id,
+      requestMetadata
+    );
+  }
+
+  @Post('test-session-data')
+  @Public()
+  async testSessionData(@Body() testData: { sessionId: string }) {
+    try {
+      this.logger.log(`Testing session data for: ${testData.sessionId}`);
+      
+      // Test session data retrieval
+      const sessionData = await this.consultationService['getTemporaryConsultationData'](testData.sessionId);
+      
+      // Test payment data retrieval
+      const paymentService = this.consultationService['paymentService'];
+      const paymentData = await paymentService.getPaymentBySessionId(testData.sessionId);
+      
+      return {
+        success: true,
+        sessionId: testData.sessionId,
+        sessionData: sessionData ? 'EXISTS' : 'NOT_FOUND',
+        paymentData: paymentData ? 'EXISTS' : 'NOT_FOUND',
+        sessionDetails: sessionData ? { keys: Object.keys(sessionData) } : null,
+        paymentDetails: paymentData
+      };
+    } catch (error) {
+      this.logger.error(`Test session data error: ${error.message}`, error.stack);
+      return {
+        success: false,
+        error: error.message,
+        stack: error.stack
+      };
+    }
+  }
 }

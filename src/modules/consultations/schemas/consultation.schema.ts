@@ -5,17 +5,32 @@ import { Encrypt } from '../../../shared/decorators/encrypt.decorator';
 export type ConsultationDocument = Consultation & Document;
 
 export enum ConsultationStatus {
-  PENDING = 'pending',
-  PAYMENT_PENDING = 'payment_pending',
-  PAYMENT_CONFIRMED = 'payment_confirmed',
-  CLINICAL_ASSESSMENT_PENDING = 'clinical_assessment_pending',
-  CLINICAL_ASSESSMENT_COMPLETE = 'clinical_assessment_complete',
-  DOCTOR_REVIEW_PENDING = 'doctor_review_pending',
-  DOCTOR_ASSIGNED = 'doctor_assigned',
-  IN_PROGRESS = 'in_progress',
-  COMPLETED = 'completed',
-  CANCELLED = 'cancelled',
-  REFUNDED = 'refunded',
+  // Core simplified statuses for production
+  ACTIVE = 'active',                         // Consultation is active and available
+  COMPLETED = 'completed',                   // Consultation finished successfully
+  IN_PROGRESS = 'in_progress',               // Currently ongoing with doctor
+  CANCELLED = 'cancelled',                   // Cancelled by patient/doctor
+  EXPIRED = 'expired',                       // Consultation expired (timeout)
+  REFUNDED = 'refunded',                     // Payment refunded
+  
+  // Additional detailed statuses for workflow management
+  DRAFT = 'draft',                           // Initial draft state
+  PENDING = 'pending',                       // Awaiting action
+  PAYMENT_PENDING = 'payment_pending',       // Payment not yet completed
+  PAYMENT_CONFIRMED = 'payment_confirmed',   // Payment completed successfully
+  CLINICAL_ASSESSMENT_PENDING = 'clinical_assessment_pending',  // Awaiting clinical assessment
+  CLINICAL_ASSESSMENT_COMPLETE = 'clinical_assessment_complete', // Clinical assessment done
+  DOCTOR_REVIEW_PENDING = 'doctor_review_pending',  // Awaiting doctor review
+  DOCTOR_ASSIGNED = 'doctor_assigned',       // Doctor has been assigned
+  ON_HOLD = 'on_hold'                       // Consultation temporarily on hold
+}
+
+export enum ConsultationPriority {
+  LOW = 'low',
+  NORMAL = 'normal',
+  HIGH = 'high',
+  URGENT = 'urgent',
+  EMERGENCY = 'emergency'
 }
 
 export enum ConsultationType {
@@ -23,7 +38,7 @@ export enum ConsultationType {
   VIDEO = 'video',
   TELE = 'tele',
   EMERGENCY = 'emergency',
-  FOLLOW_UP = 'follow_up',
+  FOLLOW_UP = 'follow_up'
 }
 
 export enum UrgencyLevel {
@@ -49,229 +64,175 @@ export class Consultation {
   @Prop({ type: Types.ObjectId, ref: 'User', index: true })
   doctorId: Types.ObjectId;
 
-  @Prop({ required: true, type: String, unique: true, index: true })
-  consultationId: string; // Changed from sessionId to consultationId - unique consultation identifier
+  // Doctor Information (populated for faster access)
+  @Prop({ type: Object })
+  @Encrypt()
+  doctorInfo: {
+    firstName: string;
+    lastName: string;
+    email: string;
+    phone: string;
+    specialization?: string;
+    assignedAt: Date;
+    assignedBy: 'system' | 'admin' | 'shift_rotation';
+  };
 
-  @Prop({ 
-    type: String, 
-    enum: ConsultationStatus, 
-    default: ConsultationStatus.PENDING,
-    index: true
-  })
+  @Prop({ required: true, type: String, unique: true, index: true })
+  consultationId: string;
+
+  @Prop({ required: true, type: String, unique: true, index: true })
+  clinicalSessionId: string;
+
+  @Prop({ type: String, enum: ConsultationStatus, default: ConsultationStatus.ACTIVE, index: true })
   status: ConsultationStatus;
 
-  @Prop({ 
-    type: String, 
-    enum: ConsultationType, 
-    required: true 
-  })
+  @Prop({ type: String, enum: ConsultationType, required: true, index: true })
   consultationType: ConsultationType;
 
-  // Detailed symptoms matching tenderly-ai-agent JSON schema
-  @Prop({ type: Object })
-  @Encrypt()
-  detailedSymptoms: {
-    patient_profile: {
-      age: number;
-      request_id: string; // patient_id
-      timestamp: string;
-    };
-    primary_complaint: {
-      main_symptom: string;
-      duration: string;
-      severity: 'mild' | 'moderate' | 'severe';
-      onset: string;
-      progression: string;
-    };
-    symptom_specific_details: {
-      symptom_characteristics: Record<string, any>;
-    };
-    reproductive_history: {
-      pregnancy_status: {
-        could_be_pregnant: boolean;
-        pregnancy_test_result: string;
-      };
-      sexual_activity: {
-        sexually_active: boolean;
-        contraception_method: string;
-      };
-      menstrual_history: {
-        menarche_age: number;
-        cycle_frequency: number;
-        period_duration: number;
-      };
-    };
-    associated_symptoms: {
-      pain: {
-        pelvic_pain: string;
-        vulvar_irritation: string;
-      };
-      systemic: {
-        fatigue: string;
-        nausea: boolean;
-        fever: boolean;
-      };
-    };
-    medical_context: {
-      current_medications: string[];
-      recent_medications: string[];
-      medical_conditions: string[];
-      previous_gynecological_issues: string[];
-      allergies: string[];
-      family_history: string[];
-    };
-    healthcare_interaction: {
-      previous_consultation: boolean;
-      consultation_outcome: string;
-      investigations_done: boolean;
-      current_treatment: string;
-    };
-    patient_concerns: {
-      main_worry: string;
-      impact_on_life: string;
-      additional_notes: string;
-    };
-  };
+  @Prop({ type: String, enum: ConsultationPriority, default: ConsultationPriority.NORMAL, index: true })
+  priority: ConsultationPriority;
 
-  // AI diagnosis - stores raw response from tenderly-ai-agent
-  @Prop({ type: Object })
-  @Encrypt()
-  aiDiagnosis: any; // Raw response from tenderly-ai-agent
+  // Business Logic Fields
+  @Prop({ type: Boolean, default: false, index: true })
+  isActive: boolean; // Only one consultation can be active per patient
 
-  // Structured diagnosis - stores comprehensive structured diagnosis response
-  @Prop({ type: Object })
-  @Encrypt()
-  structuredDiagnosis: {
-    request_id: string;
-    patient_age: number;
-    primary_symptom: string;
-    possible_diagnoses: Array<{
-      name: string;
-      confidence_score: number;
-      description?: string;
-    }>;
-    clinical_reasoning: string;
-    differential_considerations: string[];
-    safety_assessment: {
-      allergy_considerations: {
-        allergic_medications: string[];
-        safe_alternatives: string[];
-        contraindicated_drugs: string[];
-      };
-      condition_interactions: string[];
-      safety_warnings: string[];
-    };
-    risk_assessment: {
-      urgency_level: 'low' | 'moderate' | 'high' | 'urgent';
-      red_flags: string[];
-      when_to_seek_emergency_care: string[];
-    };
-    recommended_investigations: Array<{
-      name: string;
-      priority: 'low' | 'medium' | 'high';
-      reason: string;
-    }>;
-    treatment_recommendations: {
-      primary_treatment?: string;
-      safe_medications: Array<{
-        name: string;
-        dosage: string;
-        frequency: string;
-        duration: string;
-        reason: string;
-        notes?: string;
-      }>;
-      lifestyle_modifications: string[];
-      dietary_advice: string[];
-      follow_up_timeline: string;
-    };
-    patient_education: string[];
-    warning_signs: string[];
-    confidence_score: number;
-    processing_notes: string[];
-    disclaimer: string;
-    timestamp: string;
-  };
+  @Prop({ type: Date })
+  activatedAt?: Date; // When consultation became active
 
-  // Reference to separate prescription documents
-  @Prop({ type: [Types.ObjectId], ref: 'Prescription', default: [] })
-  prescriptionIds: Types.ObjectId[];
+  @Prop({ type: Date })
+  completedAt?: Date; // When consultation was completed
 
-  @Prop()
-  prescriptionPdfUrl: string;
+  @Prop({ type: Date })
+  cancelledAt?: Date; // When consultation was cancelled
 
-  // Enhanced chat history
-  @Prop({ type: [Object], default: [] })
-  @Encrypt()
-  chatHistory: {
-    senderId: Types.ObjectId;
-    senderType: 'patient' | 'doctor';
-    message: string;
-    timestamp: Date;
-    messageType: 'text' | 'image' | 'file';
-    attachments?: string[];
-  }[];
+  @Prop({ type: Date })
+  expiresAt?: Date; // Consultation expiry time
 
-  // Enhanced payment information
+  @Prop({ type: Number, default: 0 })
+  sessionCount: number; // Number of sessions/visits
+
+  @Prop({ type: Number, default: 0 })
+  messageCount: number; // Number of messages exchanged
+
+  // Payment Information
   @Prop({ type: Object })
   @Encrypt()
   paymentInfo: {
-    paymentId: Types.ObjectId | string; // Allow both ObjectId and string for mock payments
+    paymentId: string;
+    paymentStatus: 'pending' | 'completed' | 'failed' | 'refunded';
     amount: number;
     currency: string;
-    paymentMethod: string;
-    paymentStatus: 'pending' | 'completed' | 'failed';
+    paidAt?: Date;
     transactionId?: string;
-    paymentDate: Date;
+    paymentMethod?: string;
+    gatewayResponse?: any;
+    refundAmount?: number;
+    refundReason?: string;
+    refundedAt?: Date;
   };
 
-  // Status tracking with history
+  // Assessment Data
+  @Prop({ type: Object })
+  @Encrypt()
+  structuredAssessmentInput: any; // GynecologicalAssessmentDto
+
+  @Prop({ type: Object })
+  @Encrypt()
+  aiAgentOutput: any; // StructuredDiagnosisResponseDto
+
+  // Prescription Management
+  @Prop({ type: String, enum: ['pending', 'sent'], default: 'pending' })
+  prescriptionStatus: 'pending' | 'sent';
+
+  @Prop({ type: String })
+  sentPrescriptionPdfUrl?: string;
+
+  // Communication History
   @Prop({ type: [Object], default: [] })
-  statusHistory: {
+  @Encrypt()
+  chatHistory: Array<{
+    senderId: Types.ObjectId;
+    senderType: 'patient' | 'doctor' | 'system';
+    message: string;
+    timestamp: Date;
+    messageType: 'text' | 'image' | 'file' | 'system';
+    attachments?: string[];
+    isRead: boolean;
+  }>;
+
+  // Status History with Enhanced Tracking
+  @Prop({ type: [Object], default: [] })
+  statusHistory: Array<{
     status: ConsultationStatus;
     changedAt: Date;
     changedBy: Types.ObjectId;
     reason?: string;
-  }[];
+    previousStatus?: ConsultationStatus;
+    metadata?: {
+      source?: 'patient' | 'doctor' | 'system' | 'payment' | 'timeout';
+      trigger?: string;
+      notes?: string;
+    };
+  }>;
 
-  // Consultation timing
+  // Business Rules and Constraints
+  @Prop({ type: [String], default: [] })
+  businessRules: string[]; // Applied business rules
+
+  @Prop({ type: Boolean, default: false })
+  requiresFollowUp: boolean;
+
+  @Prop({ type: String })
+  followUpReason?: string;
+
   @Prop({ type: Date })
-  consultationStartTime: Date;
+  followUpDate?: Date;
+
+  // Quality and Compliance
+  @Prop({ type: Boolean, default: false })
+  isQualityReviewed: boolean;
 
   @Prop({ type: Date })
-  consultationEndTime: Date;
+  qualityReviewedAt?: Date;
 
-  // Metadata for tracking
+  @Prop({ type: Types.ObjectId, ref: 'User' })
+  qualityReviewedBy?: Types.ObjectId;
+
+  @Prop({ type: Number, min: 1, max: 5 })
+  patientSatisfactionRating?: number;
+
+  @Prop({ type: String })
+  patientFeedback?: string;
+
+  // Metadata and Audit
   @Prop({ type: Object })
   metadata: {
-    consultationId: string;
-    patientId: Types.ObjectId;
-    doctorId?: Types.ObjectId;
     ipAddress?: string;
     userAgent?: string;
     location?: string;
     deviceInfo?: string;
+    source?: 'web' | 'mobile' | 'api';
+    referralSource?: string;
+    campaignId?: string;
+    [key: string]: any;
   };
 
-  // Follow-up management
-  @Prop({ type: Number, default: 0 })
-  followUpNumber: number;
-
-  @Prop({ type: Types.ObjectId, ref: 'Consultation' })
-  parentConsultationId: Types.ObjectId;
-
-  @Prop({ type: [Types.ObjectId], ref: 'Consultation', default: [] })
-  followUpConsultations: Types.ObjectId[];
-
-  // Soft delete
+  // Soft Delete
   @Prop({ default: false })
   isDeleted: boolean;
 
   @Prop()
-  deletedAt: Date;
+  deletedAt?: Date;
 
   @Prop({ type: Types.ObjectId, ref: 'User' })
-  deletedBy: Types.ObjectId;
+  deletedBy?: Types.ObjectId;
+
+  // Indexes for Performance
+  @Prop({ type: Date, index: true })
+  createdAt: Date;
+
+  @Prop({ type: Date, index: true })
+  updatedAt: Date;
 }
 
 export const ConsultationSchema = SchemaFactory.createForClass(Consultation);

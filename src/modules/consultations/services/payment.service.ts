@@ -6,7 +6,7 @@ import { AuditService } from '../../../security/audit/audit.service';
 export interface PaymentRequest {
   sessionId: string;
   patientId: string;
-  consultationType: 'chat' | 'video' | 'emergency';
+  consultationType: 'chat' | 'tele' | 'video' | 'emergency';
   amount: number;
   currency: string;
   metadata?: {
@@ -42,9 +42,10 @@ export class PaymentService {
   
   // Mock consultation pricing
   private readonly consultationPricing = {
-    chat: { amount: 299, currency: 'INR' },
-    video: { amount: 499, currency: 'INR' },
-    emergency: { amount: 799, currency: 'INR' },
+    chat: { amount: 150, currency: 'INR' },
+    tele: { amount: 200, currency: 'INR' },
+    video: { amount: 250, currency: 'INR' },
+    emergency: { amount: 300, currency: 'INR' },
   };
 
   constructor(
@@ -58,7 +59,7 @@ export class PaymentService {
   async createPaymentOrder(
     sessionId: string,
     patientId: string,
-    consultationType: 'chat' | 'video' | 'emergency',
+    consultationType: 'chat' | 'tele' | 'video' | 'emergency',
     diagnosis: string,
     severity: string,
     requestMetadata?: { ipAddress: string; userAgent: string }
@@ -100,25 +101,33 @@ export class PaymentService {
       };
       
       // Store payment details temporarily
+      this.logger.log(`Storing payment details for session: ${sessionId}`);
       await this.storePaymentDetails(sessionId, paymentResponse);
       
       // Log audit event
-      await this.auditService.logDataAccess(
-        patientId,
-        'payment',
-        'create',
-        paymentId,
-        undefined,
-        {
-          sessionId,
-          consultationType,
-          amount: pricing.amount,
-          currency: pricing.currency,
+      try {
+        this.logger.log(`Logging audit event for payment: ${paymentId}`);
+        await this.auditService.logDataAccess(
+          patientId,
+          'payment',
+          'create',
           paymentId,
-          mockPayment: true,
-        },
-        requestMetadata
-      );
+          undefined,
+          {
+            sessionId,
+            consultationType,
+            amount: pricing.amount,
+            currency: pricing.currency,
+            paymentId,
+            mockPayment: true,
+          },
+          requestMetadata
+        );
+        this.logger.log(`Audit event logged successfully for payment: ${paymentId}`);
+      } catch (auditError) {
+        this.logger.warn(`Failed to log audit event for payment ${paymentId}: ${auditError.message}`);
+        // Don't fail the payment creation if audit logging fails
+      }
 
       this.logger.log(`Mock payment order created successfully for session: ${sessionId}, paymentId: ${paymentId}`);
       
@@ -196,12 +205,14 @@ export class PaymentService {
       // Get payment details from cache
       const cachedPayment = await this.getPaymentBySessionId(paymentConfirmation.sessionId);
       if (!cachedPayment) {
-        throw new BadRequestException('Payment session not found');
+        this.logger.error(`Payment session not found for sessionId: ${paymentConfirmation.sessionId}`);
+        throw new BadRequestException(`Payment session not found for session: ${paymentConfirmation.sessionId}. Please ensure the payment was created and the session is still valid.`);
       }
 
       // Verify payment ID matches
       if (cachedPayment.paymentId !== paymentConfirmation.paymentId) {
-        throw new BadRequestException('Payment ID mismatch');
+        this.logger.error(`Payment ID mismatch for session: ${paymentConfirmation.sessionId}. Expected: ${cachedPayment.paymentId}, Received: ${paymentConfirmation.paymentId}`);
+        throw new BadRequestException(`Payment ID mismatch. Expected: ${cachedPayment.paymentId}, Received: ${paymentConfirmation.paymentId}`);
       }
 
       // For production, this would verify with actual payment gateway
@@ -235,14 +246,19 @@ export class PaymentService {
       }
       
       // Log audit event for payment verification
-      await this.auditService.logDataAccess(
-        'system',
-        'payment',
-        'update',
-        paymentConfirmation.paymentId,
-        cachedPayment,
-        updatedPaymentStatus
-      );
+      try {
+        await this.auditService.logDataAccess(
+          'system',
+          'payment',
+          'update',
+          paymentConfirmation.paymentId,
+          cachedPayment,
+          updatedPaymentStatus
+        );
+      } catch (auditError) {
+        this.logger.warn(`Failed to log audit event for payment verification: ${auditError.message}`);
+        // Don't fail the payment verification if audit logging fails
+      }
 
       this.logger.log(`Payment verification completed for session: ${paymentConfirmation.sessionId}, status: ${updatedPaymentStatus.status}`);
       
@@ -255,7 +271,15 @@ export class PaymentService {
         throw error;
       }
       
-      throw new InternalServerErrorException('Failed to verify payment');
+      // Log additional context for debugging
+      this.logger.error(`Payment verification failed with context:`, {
+        sessionId: paymentConfirmation.sessionId,
+        paymentId: paymentConfirmation.paymentId,
+        error: error.message,
+        stack: error.stack
+      });
+      
+      throw new InternalServerErrorException('Failed to verify payment. Please try again or contact support if the issue persists.');
     }
   }
 
@@ -276,7 +300,7 @@ export class PaymentService {
   /**
    * Get consultation pricing
    */
-  getConsultationPricing(consultationType: 'chat' | 'video' | 'emergency'): { amount: number; currency: string } {
+  getConsultationPricing(consultationType: 'chat' | 'tele' | 'video' | 'emergency'): { amount: number; currency: string } {
     return this.consultationPricing[consultationType];
   }
 
@@ -284,19 +308,28 @@ export class PaymentService {
    * Store payment details in cache
    */
   private async storePaymentDetails(sessionId: string, paymentResponse: PaymentResponse): Promise<void> {
-    const cacheKey = `payment:${sessionId}`;
-    const paymentData: PaymentStatus = {
-      paymentId: paymentResponse.paymentId,
-      status: 'payment_pending',
-      amount: paymentResponse.amount,
-      currency: paymentResponse.currency,
-    };
+    try {
+      this.logger.log(`Storing payment details for session: ${sessionId}, paymentId: ${paymentResponse.paymentId}`);
+      
+      const cacheKey = `payment:${sessionId}`;
+      const paymentData: PaymentStatus = {
+        paymentId: paymentResponse.paymentId,
+        status: 'payment_pending',
+        amount: paymentResponse.amount,
+        currency: paymentResponse.currency,
+      };
 
-    await this.cacheService.set(cacheKey, paymentData, 24 * 60 * 60); // 24 hours
-    
-    // Also store reverse mapping for webhook processing
-    const reverseKey = `payment:id:${paymentResponse.paymentId}`;
-    await this.cacheService.set(reverseKey, { sessionId }, 24 * 60 * 60);
+      await this.cacheService.set(cacheKey, paymentData, 24 * 60 * 60); // 24 hours
+      
+      // Also store reverse mapping for webhook processing
+      const reverseKey = `payment:id:${paymentResponse.paymentId}`;
+      await this.cacheService.set(reverseKey, { sessionId }, 24 * 60 * 60);
+      
+      this.logger.log(`Payment details stored successfully for session: ${sessionId}`);
+    } catch (error) {
+      this.logger.error(`Failed to store payment details for session ${sessionId}: ${error.message}`);
+      throw new Error(`Failed to store payment details: ${error.message}`);
+    }
   }
 
   /**

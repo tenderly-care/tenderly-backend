@@ -15,13 +15,17 @@ import { DoctorShift, DoctorShiftSchema } from './schemas/doctor-shift.schema';
 import { CacheModule } from '../../core/cache/cache.module';
 import { AuditService } from '../../security/audit/audit.service';
 import { AuditLog, AuditLogSchema } from '../../security/audit/schemas/audit-log.schema';
+import { ConsultationBusinessService } from './services/consultation-business.service';
+import { DoctorAssignmentService } from './services/doctor-assignment.service';
+import { User, UserSchema } from '../users/schemas/user.schema';
 
 @Module({
   imports: [
     MongooseModule.forFeature([
       { name: Consultation.name, schema: ConsultationSchema },
       { name: DoctorShift.name, schema: DoctorShiftSchema },
-      { name: 'AuditLog', schema: AuditLogSchema }
+      { name: AuditLog.name, schema: AuditLogSchema },
+      { name: User.name, schema: UserSchema }
     ]),
     CacheModule,
     HttpModule,
@@ -34,7 +38,23 @@ import { AuditLog, AuditLogSchema } from '../../security/audit/schemas/audit-log
     ]),
   ],
   controllers: [ConsultationController, DoctorShiftController],
-  providers: [ConsultationService, DoctorShiftService, AIAgentService, AITokenService, PaymentService, AuditService, SessionManagerService],
-  exports: [ConsultationService, DoctorShiftService],
+  providers: [
+    ConsultationService,
+    ConsultationBusinessService,
+    DoctorAssignmentService,
+    AIAgentService,
+    AITokenService,
+    PaymentService,
+    SessionManagerService,
+    DoctorShiftService,
+    AuditService
+  ],
+  exports: [
+    ConsultationService,
+    ConsultationBusinessService,
+    AIAgentService,
+    PaymentService,
+    SessionManagerService
+  ]
 })
 export class ConsultationModule {}

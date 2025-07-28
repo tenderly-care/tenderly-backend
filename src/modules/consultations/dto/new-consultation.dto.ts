@@ -425,6 +425,11 @@ export class UpdateConsultationStatusDto {
   @IsNotEmpty()
   @IsString()
   changedBy: string;
+
+  @ApiPropertyOptional({ example: 'Additional notes about the status change' })
+  @IsOptional()
+  @IsString()
+  notes?: string;
 }
 
 // Prescription DTOs

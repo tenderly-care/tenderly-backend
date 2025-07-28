@@ -10,7 +10,7 @@ import {
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
-import { Consultation, ConsultationDocument, ConsultationStatus, ConsultationType } from '../schemas/consultation.schema';
+import { Consultation, ConsultationDocument, ConsultationStatus, ConsultationType, ConsultationPriority } from '../schemas/consultation.schema';
 import { 
   CreateConsultationDto, 
   UpdateConsultationStatusDto, 
@@ -34,9 +34,11 @@ import {
 import { CacheService } from '../../../core/cache/cache.service';
 import { AuditService } from '../../../security/audit/audit.service';
 import { DoctorShiftService } from './doctor-shift.service';
+import { DoctorAssignmentService } from './doctor-assignment.service';
 import { AIAgentService } from './ai-agent.service';
 import { PaymentService } from './payment.service';
 import { SessionManagerService } from './session-manager.service';
+import { ConsultationBusinessService } from './consultation-business.service';
 
 @Injectable()
 export class ConsultationService {
@@ -50,9 +52,11 @@ export class ConsultationService {
     private auditService: AuditService,
     private configService: ConfigService,
     private doctorShiftService: DoctorShiftService,
+    private doctorAssignmentService: DoctorAssignmentService,
     private aiAgentService: AIAgentService,
     private paymentService: PaymentService,
     private sessionManager: SessionManagerService,
+    private consultationBusinessService: ConsultationBusinessService,
   ) {}
 
   /**
@@ -226,50 +230,71 @@ export class ConsultationService {
   async collectStructuredGynecologicalAssessment(
     patientId: string,
     assessmentData: GynecologicalAssessmentDto,
+    clinicalSessionId: string,
     requestMetadata?: { ipAddress: string; userAgent: string }
-  ): Promise<StructuredDiagnosisResponseDto & { sessionId: string; consultationPricing: any }> {
+  ): Promise<StructuredDiagnosisResponseDto & { consultationId: string; clinicalSessionId: string; consultationPricing: any; paymentVerified: boolean }> {
     try {
       this.logger.log(`Collecting structured gynecological assessment for patient: ${patientId}`);
       
-      // Validate input according to schema rules
+      // 1. Find consultation by clinicalSessionId and patientId
+      const consultation = await this.consultationModel.findOne({
+        patientId: new Types.ObjectId(patientId),
+        clinicalSessionId
+      });
+      if (!consultation) {
+        this.logger.warn(`No consultation found for patient: ${patientId} and clinicalSessionId: ${clinicalSessionId}`);
+        throw new BadRequestException('Consultation not found. Please confirm payment first.');
+      }
+
+      // 2. Verify payment status and phase
+      if (!consultation.paymentInfo || consultation.paymentInfo.paymentStatus !== 'completed') {
+        this.logger.warn(`Payment not confirmed for consultation: ${consultation.consultationId}`);
+        throw new BadRequestException('Payment not confirmed. Please complete payment first.');
+      }
+      
+      // Debug: Log the status values for comparison
+      this.logger.debug(`Status comparison - DB status: "${consultation.status}" (type: ${typeof consultation.status}), Enum value: "${ConsultationStatus.PAYMENT_CONFIRMED}" (type: ${typeof ConsultationStatus.PAYMENT_CONFIRMED})`);
+      
+      if (consultation.status !== ConsultationStatus.PAYMENT_CONFIRMED) {
+        this.logger.warn(`Consultation not in PAYMENT_CONFIRMED phase: ${consultation.consultationId}`);
+        throw new BadRequestException('Consultation not ready for assessment.');
+      }
+
+      // 3. Validate input
       this.validateStructuredAssessment(assessmentData, patientId);
 
-      // Create session using SessionManager
-      const sessionId = await this.sessionManager.createSession(patientId, requestMetadata);
-      
-      // Transform input for AI agent compatibility
+      // 4. Call AI agent
       const transformedInput = this.transformStructuredAssessment(assessmentData);
-
-      // Call AI Agent service to get structured diagnosis
       const structuredDiagnosis = await this.aiAgentService.getStructuredDiagnosis(
         patientId,
         transformedInput,
         requestMetadata
       );
 
-      // Get consultation pricing based on urgency level
+      // 5. Get consultation pricing
       const consultationPricing = this.getConsultationPricingFromUrgency(
         structuredDiagnosis.risk_assessment?.urgency_level || 'moderate'
       );
 
-      // Update session with structured diagnosis and pricing
-      await this.sessionManager.updateSession(
-        sessionId,
-        'consultation_selection',
-        {
-          initialSymptoms: transformedInput,
-          aiDiagnosis: structuredDiagnosis,
-          consultationPricing
-        },
-        patientId
-      );
+      // 6. Update consultation with input/output, status, and statusHistory
+      consultation.structuredAssessmentInput = assessmentData;
+      consultation.aiAgentOutput = structuredDiagnosis;
+      consultation.status = ConsultationStatus.CLINICAL_ASSESSMENT_COMPLETE;
+      consultation.statusHistory = consultation.statusHistory || [];
+      consultation.statusHistory.push({
+        status: ConsultationStatus.CLINICAL_ASSESSMENT_COMPLETE,
+        changedAt: new Date(),
+        changedBy: new Types.ObjectId(patientId),
+        reason: 'Structured assessment completed'
+      });
+      await consultation.save();
 
-      // Log audit event
+      // 7. Log audit
       await this.auditService.logDataAccess(
         patientId,
         'structured-gynecological-assessment',
         'create',
-        sessionId,
+        consultation.consultationId,
         undefined,
         {
           patientProfile: {
@@ -286,30 +311,28 @@ export class ConsultationService {
             confidenceScore: structuredDiagnosis.confidence_score,
             urgencyLevel: structuredDiagnosis.risk_assessment?.urgency_level
           },
-          sessionId
+          consultationId: consultation._id,
+          clinicalSessionId,
+          paymentVerified: true
         },
         requestMetadata
       );
 
-      this.logger.log(`Structured assessment session created successfully: ${sessionId} for patient: ${patientId}`);
-
-      // Return extended response with session info
-      const response = {
-        ...structuredDiagnosis,
-        sessionId,
-        consultationPricing
-      };
-      
       this.logger.log(`Structured assessment completed successfully for patient: ${patientId}`);
-      
-      return response;
+
+      // 8. Return response
+      return {
+        ...structuredDiagnosis,
+        consultationId: consultation.consultationId,
+        clinicalSessionId,
+        consultationPricing,
+        paymentVerified: true
+      };
     } catch (error) {
       this.logger.error(`Failed to collect structured assessment for patient ${patientId}: ${error.message}`);
-      
       if (error instanceof BadRequestException) {
         throw error;
       }
-      
       throw new InternalServerErrorException('Failed to collect structured assessment and generate diagnosis');
     }
   }
@@ -654,16 +677,19 @@ export class ConsultationService {
         return cachedResult;
       }
 
+      // Convert patientId to ObjectId for database query
+      const patientObjectId = new Types.ObjectId(patientId);
+
       // Fetch from database
       const [consultations, total] = await Promise.all([
         this.consultationModel
-          .find({ patientId })
+          .find({ patientId: patientObjectId })
           .sort({ createdAt: -1 })
           .limit(limit)
           .skip(offset)
           .populate('doctorId', 'firstName lastName specialization')
           .exec(),
-        this.consultationModel.countDocuments({ patientId })
+        this.consultationModel.countDocuments({ patientId: patientObjectId })
       ]);
 
       const result = { consultations, total };
@@ -727,12 +753,12 @@ export class ConsultationService {
   }
 
   /**
-   * Find consultation by session ID
+   * Find consultation by session ID (now uses consultationId)
    */
   async findConsultationBySessionId(sessionId: string): Promise<Consultation> {
     try {
       const consultation = await this.consultationModel
-        .findOne({ sessionId })
+        .findOne({ consultationId: sessionId })
         .populate('patientId', 'firstName lastName email')
         .populate('doctorId', 'firstName lastName specialization')
         .exec();
@@ -822,7 +848,6 @@ export class ConsultationService {
       // Soft delete by updating status
       await this.consultationModel.findByIdAndUpdate(consultationId, {
         status: ConsultationStatus.CANCELLED,
-        consultationEndTime: new Date(),
       });
 
       // Clear cache
@@ -991,87 +1016,7 @@ export class ConsultationService {
     }
   }
 
-  /**
-   * Select consultation type and initiate payment
-   */
-  async selectConsultationType(
-    consultationSelectionDto: any,
-    patientId: string,
-    requestMetadata?: { ipAddress: string; userAgent: string }
-  ): Promise<any> {
-    try {
-      this.logger.log(`Selecting consultation type for patient: ${patientId}`);
-      
-      // Retrieve session data using SessionManagerService
-      const session = await this.sessionManager.validateSessionPhase(
-        consultationSelectionDto.sessionId,
-        'consultation_selection',
-        patientId
-      );
-      
-      // Get AI diagnosis from session data
-      const aiDiagnosis = session.data.aiDiagnosis;
-      if (!aiDiagnosis) {
-        this.logger.warn(`No AI diagnosis found in session ${consultationSelectionDto.sessionId}`);
-        throw new BadRequestException('Session missing AI diagnosis data');
-      }
 
-      // Get payment details
-      const paymentDetails = await this.paymentService.createPaymentOrder(
-        consultationSelectionDto.sessionId,
-        patientId,
-        consultationSelectionDto.selectedConsultationType,
-        aiDiagnosis?.diagnosis || 'General consultation',
-        aiDiagnosis?.severity || 'medium'
-      );
-
-      // Update session with selected consultation type and payment details
-      await this.sessionManager.updateSession(
-        consultationSelectionDto.sessionId,
-        'payment_pending',
-        {
-          selectedConsultationType: consultationSelectionDto.selectedConsultationType,
-          paymentDetails,
-          preferences: consultationSelectionDto.preferences
-        },
-        patientId
-      );
-
-      // Log audit event for consultation type selection
-      await this.auditService.logDataAccess(
-        patientId,
-        'consultation-selection',
-        'create',
-        consultationSelectionDto.sessionId,
-        undefined,
-        {
-          selectedConsultationType: consultationSelectionDto.selectedConsultationType,
-          paymentDetails,
-          preferences: consultationSelectionDto.preferences,
-          sessionId: consultationSelectionDto.sessionId
-        },
-        requestMetadata
-      );
-
-      this.logger.log(`Consultation type selected successfully for session: ${consultationSelectionDto.sessionId}`);
-
-      return {
-        sessionId: consultationSelectionDto.sessionId,
-        paymentDetails,
-        selectedConsultationType: consultationSelectionDto.selectedConsultationType,
-        message: 'Consultation type selected successfully'
-      };
-
-    } catch (error) {
-      this.logger.error(`Failed to select consultation type for patient ${patientId}: ${error.message}`);
-      
-      if (error instanceof BadRequestException) {
-        throw error;
-      }
-      
-      throw new InternalServerErrorException('Failed to select consultation type');
-    }
-  }
 
   /**
    * Confirm payment ONLY - No consultation creation (Production Standard)
@@ -1085,89 +1030,239 @@ export class ConsultationService {
     
     try {
       this.logger.log(`[${transactionId}] Confirming payment for patient: ${patientId}, session: ${paymentConfirmationDto.sessionId}`);
-      
+
       // Validate input
       if (!paymentConfirmationDto.sessionId || !paymentConfirmationDto.paymentId) {
         throw new BadRequestException('Session ID and Payment ID are required');
       }
 
-      // Step 1: Verify payment with gateway (mock or real)
+      // Step 1: Verify payment with payment service
       this.logger.debug(`[${transactionId}] Verifying payment with ID: ${paymentConfirmationDto.paymentId}`);
-      const paymentStatus = await this.paymentService.verifyPayment(paymentConfirmationDto);
+      let paymentStatus;
+      try {
+        paymentStatus = await this.paymentService.verifyPayment(paymentConfirmationDto);
+        this.logger.debug(`[${transactionId}] Payment verification completed successfully`);
+      } catch (paymentError) {
+        this.logger.error(`[${transactionId}] Payment verification failed: ${paymentError.message}`, paymentError.stack);
+        if (paymentError instanceof BadRequestException) {
+          throw paymentError; // Re-throw BadRequestException as-is
+        }
+        throw new InternalServerErrorException('Payment verification failed. Please try again.');
+      }
 
-      if (paymentStatus.status !== 'payment_completed') {
-        this.logger.error(`[${transactionId}] Payment verification failed: status is ${paymentStatus.status}`);
-        throw new BadRequestException(`Payment verification failed: ${paymentStatus.status}`);
+      if (!paymentStatus || paymentStatus.status !== 'payment_completed') {
+        throw new BadRequestException('Payment verification failed or payment not completed');
       }
 
       this.logger.debug(`[${transactionId}] Payment verified successfully: ${paymentStatus.paymentId}`);
 
-      // Step 2: Retrieve session data to validate it exists
+      // Step 2: Validate session data
       this.logger.debug(`[${transactionId}] Validating session data for session: ${paymentConfirmationDto.sessionId}`);
-      const session = await this.sessionManager.validateSessionPhase(
-        paymentConfirmationDto.sessionId,
-        'payment_pending',
-        patientId
-      );
+      let sessionData;
+      try {
+        sessionData = await this.retrieveAndValidateSessionData(
+          paymentConfirmationDto.sessionId,
+          patientId,
+          transactionId
+        );
+        this.logger.debug(`[${transactionId}] Session data validation completed successfully`);
+      } catch (sessionError) {
+        this.logger.error(`[${transactionId}] Session data validation failed: ${sessionError.message}`, sessionError.stack);
+        throw new BadRequestException(`Session data validation failed: ${sessionError.message}`);
+      }
 
       this.logger.debug(`[${transactionId}] Session data validated successfully`);
 
-      // Step 3: Create clinical session for Phase 2 (detailed symptom collection)
-      const clinicalSessionId = await this.sessionManager.createClinicalSession(
-        paymentConfirmationDto.sessionId,
-        patientId,
-        requestMetadata
-      );
+      // Step 3: Create clinical session
+      let clinicalSessionId;
+      try {
+        clinicalSessionId = await this.sessionManager.createClinicalSession(
+          paymentConfirmationDto.sessionId,
+          patientId,
+          requestMetadata
+        );
+        this.logger.debug(`[${transactionId}] Clinical session created successfully: ${clinicalSessionId}`);
+      } catch (sessionManagerError) {
+        this.logger.error(`[${transactionId}] Failed to create clinical session: ${sessionManagerError.message}`, sessionManagerError.stack);
+        throw new InternalServerErrorException('Failed to create clinical session. Please try again.');
+      }
 
       this.logger.debug(`[${transactionId}] Clinical session created: ${clinicalSessionId}`);
 
-      // Step 4: Update session to payment confirmed (NOT create consultation)
-      await this.sessionManager.updateSession(
-        paymentConfirmationDto.sessionId,
-        'payment_confirmed',
-        {
-          paymentConfirmed: true,
-          paymentDetails: paymentStatus,
-          clinicalSessionId,
-          completedAt: new Date()
-        },
-        patientId
-      );
+      // Step 4: Check for consultation conflicts
+      let conflicts;
+      try {
+        conflicts = await this.consultationBusinessService.checkConsultationConflicts(patientId);
+        this.logger.debug(`[${transactionId}] Consultation conflicts check completed`);
+      } catch (conflictError) {
+        this.logger.warn(`[${transactionId}] Failed to check consultation conflicts: ${conflictError.message}`);
+        // Don't fail the payment confirmation if conflict check fails
+        conflicts = { hasActiveConsultation: false };
+      }
+      
+      if (conflicts.hasActiveConsultation) {
+        this.logger.warn(`[${transactionId}] Patient ${patientId} has active consultation: ${conflicts.activeConsultation.consultationId}`);
+        // Optionally handle this case - either cancel existing or prevent new one
+      }
 
-      // Step 5: Log audit event for payment confirmation ONLY
-      await this.auditService.logDataAccess(
-        patientId,
-        'payment-confirmation',
-        'update',
-        paymentConfirmationDto.sessionId,
-        undefined,
-        {
+      // Step 5: Assign doctor based on current shift
+      let doctorAssignment;
+      try {
+        this.logger.debug(`[${transactionId}] Assigning doctor based on current shift`);
+        doctorAssignment = await this.doctorAssignmentService.assignDoctorToConsultation(
+          sessionData.selectedConsultationType || 'chat',
+          'normal'
+        );
+        this.logger.debug(`[${transactionId}] Doctor assigned successfully: ${doctorAssignment.doctorInfo.firstName} ${doctorAssignment.doctorInfo.lastName}`);
+      } catch (doctorError) {
+        this.logger.error(`[${transactionId}] Failed to assign doctor: ${doctorError.message}`, doctorError.stack);
+        throw new InternalServerErrorException('Failed to assign doctor to consultation. Please try again.');
+      }
+
+      // Step 6: Create or update Consultation document in DB
+      let consultation;
+      try {
+        consultation = await this.consultationModel.findOne({
+          patientId: new Types.ObjectId(patientId),
+          consultationId: paymentConfirmationDto.sessionId
+        });
+
+        const now = new Date();
+        const paymentInfo = {
           paymentId: paymentStatus.paymentId,
-          sessionId: paymentConfirmationDto.sessionId,
-          transactionId,
+          paymentStatus: 'completed' as 'completed',
           amount: paymentStatus.amount,
           currency: paymentStatus.currency,
-          clinicalSessionId
-        },
-        requestMetadata
-      );
+          paidAt: now,
+          transactionId: paymentStatus.transactionId,
+          ...(paymentStatus && (paymentStatus as any).paymentMethod ? { paymentMethod: (paymentStatus as any).paymentMethod } : {}),
+          ...(paymentStatus && (paymentStatus as any).gatewayResponse ? { gatewayResponse: (paymentStatus as any).gatewayResponse } : {})
+        };
+
+        if (!consultation) {
+          consultation = new this.consultationModel({
+            patientId: new Types.ObjectId(patientId),
+            doctorId: new Types.ObjectId(doctorAssignment.doctorId),
+            doctorInfo: doctorAssignment.doctorInfo,
+            consultationId: paymentConfirmationDto.sessionId,
+            clinicalSessionId,
+            consultationType: sessionData.selectedConsultationType as ConsultationType || ConsultationType.CHAT,
+            priority: ConsultationPriority.NORMAL,
+            status: ConsultationStatus.PAYMENT_CONFIRMED,
+            isActive: true,
+            activatedAt: now,
+            paymentInfo,
+            prescriptionStatus: 'pending',
+            expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000), // 24 hours from now
+            businessRules: [
+              'automatic_doctor_assignment_based_on_shift',
+              'single_active_consultation_per_patient',
+              '24_hour_consultation_expiry'
+            ],
+            statusHistory: [{
+              status: ConsultationStatus.ACTIVE,
+              changedAt: now,
+              changedBy: new Types.ObjectId(patientId),
+              reason: 'Payment confirmed and doctor assigned',
+              metadata: {
+                source: 'payment',
+                trigger: 'payment_confirmation',
+                notes: `Payment confirmed, consultation activated, and doctor assigned: ${doctorAssignment.doctorInfo.firstName} ${doctorAssignment.doctorInfo.lastName}`,
+                doctorAssignment: doctorAssignment.assignmentMetadata
+              }
+            }],
+            metadata: {
+              ...requestMetadata,
+              source: 'api',
+              referralSource: 'payment_confirmation',
+              doctorAssignmentMethod: doctorAssignment.assignmentMetadata.fallbackUsed ? 'fallback' : 'shift_based'
+            }
+          });
+          await consultation.save();
+          this.logger.debug(`[${transactionId}] New consultation created in database with doctor assigned`);
+        } else {
+          // Update existing consultation
+          consultation.paymentInfo = paymentInfo;
+          consultation.doctorId = new Types.ObjectId(doctorAssignment.doctorId);
+          consultation.doctorInfo = doctorAssignment.doctorInfo;
+          consultation.status = ConsultationStatus.PAYMENT_CONFIRMED;
+          consultation.isActive = true;
+          consultation.activatedAt = now;
+          consultation.businessRules = [
+            'automatic_doctor_assignment_based_on_shift',
+            'single_active_consultation_per_patient',
+            '24_hour_consultation_expiry'
+          ];
+          consultation.statusHistory.push({
+            status: ConsultationStatus.ACTIVE,
+            changedAt: now,
+            changedBy: new Types.ObjectId(patientId),
+            reason: 'Payment confirmed and doctor assigned',
+            metadata: {
+              source: 'payment',
+              trigger: 'payment_confirmation',
+              notes: `Payment confirmed, consultation activated, and doctor assigned: ${doctorAssignment.doctorInfo.firstName} ${doctorAssignment.doctorInfo.lastName}`,
+              doctorAssignment: doctorAssignment.assignmentMetadata
+            }
+          });
+          await consultation.save();
+          this.logger.debug(`[${transactionId}] Existing consultation updated in database with doctor assigned`);
+        }
+      } catch (dbError) {
+        this.logger.error(`[${transactionId}] Failed to create/update consultation in database: ${dbError.message}`, dbError.stack);
+        throw new InternalServerErrorException('Failed to create consultation record. Please try again.');
+      }
+
+      // Step 6: Log audit event
+      try {
+        await this.auditService.logDataAccess(
+          patientId,
+          'payment',
+          'update',
+          paymentConfirmationDto.sessionId,
+          undefined,
+          {
+            sessionId: paymentConfirmationDto.sessionId,
+            paymentId: paymentStatus.paymentId,
+            clinicalSessionId,
+            consultationId: consultation._id,
+            amount: paymentStatus.amount,
+            currency: paymentStatus.currency,
+            status: 'confirmed'
+          },
+          requestMetadata
+        );
+        this.logger.debug(`[${transactionId}] Audit event logged successfully`);
+      } catch (auditError) {
+        this.logger.warn(`[${transactionId}] Failed to log audit event: ${auditError.message}`);
+        // Don't fail the payment confirmation if audit logging fails
+      }
+
+      // Step 7: Clean up temporary data
+      try {
+        await this.cleanupTemporaryData(paymentConfirmationDto.sessionId, transactionId);
+        this.logger.debug(`[${transactionId}] Temporary data cleanup completed`);
+      } catch (cleanupError) {
+        this.logger.warn(`[${transactionId}] Failed to cleanup temporary data: ${cleanupError.message}`);
+        // Don't fail the payment confirmation if cleanup fails
+      }
 
       this.logger.log(`[${transactionId}] Payment confirmation completed successfully for patient: ${patientId}`);
 
-      // Return payment confirmation response WITHOUT consultation
       return {
+        success: true,
+        message: 'Payment confirmed successfully',
         sessionId: paymentConfirmationDto.sessionId,
         paymentStatus: 'confirmed',
         paymentId: paymentStatus.paymentId,
         clinicalSessionId,
         amount: paymentStatus.amount,
         currency: paymentStatus.currency,
-        message: 'Payment confirmed. Please proceed to detailed symptom collection.',
-        transactionId,
+        consultationId: consultation._id,
         nextStep: {
-          endpoint: '/consultations/symptoms/collect',
+          endpoint: '/consultations/symptoms/collect-structured',
           clinicalSessionId,
-          description: 'Collect symptoms to create consultation'
+          description: 'Collect structured symptoms for AI assessment'
         }
       };
 
@@ -1179,12 +1274,17 @@ export class ConsultationService {
         throw error;
       }
       
-      // Wrap unknown errors with more context
-      throw new InternalServerErrorException({
-        message: 'Failed to confirm payment',
-        transactionId,
-        error: error.message
+      // Log additional context for debugging
+      this.logger.error(`[${transactionId}] Payment confirmation failed with context:`, {
+        patientId,
+        sessionId: paymentConfirmationDto?.sessionId,
+        paymentId: paymentConfirmationDto?.paymentId,
+        error: error.message,
+        stack: error.stack
       });
+      
+      // Wrap unknown errors with more context
+      throw new InternalServerErrorException('Failed to confirm payment. Please try again or contact support if the issue persists.');
     }
   }
 
@@ -1285,7 +1385,6 @@ export class ConsultationService {
             diagnosedAt: new Date()
           } : undefined,
           status: investigationDto.clinicalNotes ? ConsultationStatus.COMPLETED : consultation.status,
-          consultationEndTime: investigationDto.clinicalNotes ? new Date() : consultation.consultationEndTime
         },
         doctorId,
         requestMetadata,
@@ -3023,6 +3122,188 @@ export class ConsultationService {
       };
     }
   }
+
+  // Business Logic Methods
+  async checkConsultationConflicts(patientId: string): Promise<any> {
+    return await this.consultationBusinessService.checkConsultationConflicts(patientId);
+  }
+
+  async getPatientConsultationStats(patientId: string): Promise<any> {
+    return await this.consultationBusinessService.getPatientConsultationStats(patientId);
+  }
+
+  async getActiveConsultation(patientId: string): Promise<Consultation | null> {
+    return await this.consultationBusinessService.getActiveConsultation(patientId);
+  }
+
+  async updateConsultationStatus(
+    consultationId: string,
+    newStatus: ConsultationStatus,
+    changedBy: string,
+    reason?: string,
+    metadata?: any
+  ): Promise<void> {
+    return await this.consultationBusinessService.updateConsultationStatus(
+      consultationId,
+      newStatus,
+      changedBy,
+      reason,
+      metadata
+    );
+  }
+
+  async selectConsultationType(
+    selectionData: { sessionId: string; selectedConsultationType: string },
+    patientId: string,
+    requestMetadata?: { ipAddress: string; userAgent: string }
+  ): Promise<any> {
+    this.logger.log(`Patient ${patientId} selecting consultation type: ${selectionData.selectedConsultationType}`);
+
+    // Validate consultation type
+    const validTypes = ['chat', 'video', 'tele', 'emergency', 'follow_up', 'structured_assessment'];
+    if (!validTypes.includes(selectionData.selectedConsultationType)) {
+      throw new BadRequestException(`Invalid consultation type. Must be one of: ${validTypes.join(', ')}`);
+    }
+
+    // Check for conflicts
+    await this.consultationBusinessService.validateNewConsultation(patientId);
+
+    // Get consultation pricing based on type
+    const pricing = this.getConsultationPricing(selectionData.selectedConsultationType);
+
+    // Check if session exists, if not create it
+    let sessionData = await this.sessionManager.getSession(selectionData.sessionId);
+    if (!sessionData) {
+      // Create a new session with the provided sessionId
+      this.logger.log(`Session ${selectionData.sessionId} not found, creating new session for patient ${patientId}`);
+      const session: any = {
+        sessionId: selectionData.sessionId,
+        patientId,
+        currentPhase: 'consultation_selection',
+        data: {
+          selectedConsultationType: selectionData.selectedConsultationType,
+          consultationPricing: pricing
+        },
+        metadata: {
+          createdAt: new Date(),
+          updatedAt: new Date(),
+          ...requestMetadata
+        },
+        expiresAt: new Date(Date.now() + 3600 * 1000) // 1 hour
+      };
+      
+      // Store the session directly
+      await this.sessionManager.storeSession(selectionData.sessionId, session);
+      sessionData = session;
+    } else {
+      // Update existing session with selected consultation type
+      await this.sessionManager.updateSession(
+        selectionData.sessionId,
+        'consultation_selection',
+        {
+          selectedConsultationType: selectionData.selectedConsultationType,
+          consultationPricing: pricing
+        },
+        patientId
+      );
+    }
+
+    // Log audit
+    await this.auditService.logDataAccess(
+      patientId,
+      'consultation-selection',
+      'create',
+      selectionData.sessionId,
+      undefined,
+      {
+        selectedType: selectionData.selectedConsultationType,
+        pricing,
+        sessionId: selectionData.sessionId
+      },
+      requestMetadata
+    );
+
+    return {
+      message: 'Consultation type selected successfully',
+      sessionId: selectionData.sessionId,
+      consultationType: selectionData.selectedConsultationType,
+      pricing,
+      nextStep: {
+        endpoint: '/consultations/confirm-payment',
+        description: 'Proceed to payment confirmation'
+      }
+    };
+  }
+
+  async createMockPayment(
+    sessionId: string,
+    patientId: string,
+    requestMetadata?: { ipAddress: string; userAgent: string }
+  ): Promise<any> {
+    const transactionId = `mock_payment_${Date.now()}`;
+    
+    try {
+      this.logger.log(`[${transactionId}] Creating mock payment for session: ${sessionId}, patient: ${patientId}`);
+
+      // Get session data to determine consultation type and pricing
+      const sessionData = await this.sessionManager.getSession(sessionId);
+      if (!sessionData) {
+        throw new BadRequestException('Session not found');
+      }
+
+      const consultationType = sessionData.data?.selectedConsultationType || 'chat';
+      const pricing = sessionData.data?.consultationPricing || this.getConsultationPricing(consultationType);
+
+      // Create mock payment using payment service
+      const paymentResponse = await this.paymentService.createPaymentOrder(
+        sessionId,
+        patientId,
+        consultationType as 'chat' | 'tele' | 'video' | 'emergency',
+        'Mock diagnosis for testing',
+        'medium',
+        requestMetadata
+      );
+
+      // Log audit event
+      await this.auditService.logDataAccess(
+        patientId,
+        'payment',
+        'create',
+        sessionId,
+        undefined,
+        {
+          sessionId,
+          consultationType,
+          paymentId: paymentResponse.paymentId,
+          amount: paymentResponse.amount,
+          currency: paymentResponse.currency,
+          mockPayment: true
+        },
+        requestMetadata
+      );
+
+      this.logger.log(`[${transactionId}] Mock payment created successfully: ${paymentResponse.paymentId}`);
+
+      return {
+        message: 'Mock payment created successfully',
+        paymentId: paymentResponse.paymentId,
+        paymentUrl: paymentResponse.paymentUrl,
+        status: paymentResponse.status,
+        amount: paymentResponse.amount,
+        currency: paymentResponse.currency,
+        expiresAt: paymentResponse.expiresAt,
+        nextStep: {
+          endpoint: '/consultations/confirm-payment',
+          description: 'Confirm payment to proceed'
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`[${transactionId}] Failed to create mock payment: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
+
 
 
 }

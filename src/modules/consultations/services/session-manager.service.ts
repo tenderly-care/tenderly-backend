@@ -37,13 +37,15 @@ export interface ClinicalSession {
   clinicalSessionId: string;
   consultationId: string;
   patientId: string;
-  currentPhase: 'detailed_assessment' | 'doctor_review' | 'treatment_planning' | 'completed';
+  currentPhase: 'detailed_assessment' | 'symptoms_collected' | 'doctor_review' | 'treatment_planning' | 'completed';
   data: {
     detailedSymptoms?: any;
     clinicalDiagnosis?: any;
     doctorNotes?: any;
     treatmentPlan?: any;
     prescriptions?: any;
+    structuredDiagnosis?: any;
+    consultationPricing?: any;
   };
   metadata: {
     createdAt: Date;
@@ -262,6 +264,60 @@ export class SessionManagerService {
   }
 
   /**
+   * Get payment session for a patient
+   */
+  async getPaymentSession(patientId: string): Promise<{
+    sessionId: string;
+    patientId: string;
+    paymentStatus: 'pending' | 'confirmed' | 'failed';
+    clinicalSessionId?: string;
+    paymentDetails?: any;
+  } | null> {
+    try {
+      // Search for sessions with payment_confirmed status for this patient
+      // This is a simplified implementation - in production you might want to store payment sessions separately
+      const sessions = await this.getAllSessionsForPatient(patientId);
+      
+      for (const session of sessions) {
+        if (session.currentPhase === 'payment_confirmed' && session.data.paymentConfirmed) {
+          return {
+            sessionId: session.sessionId,
+            patientId: session.patientId,
+            paymentStatus: 'confirmed',
+            clinicalSessionId: session.data.clinicalSessionId,
+            paymentDetails: session.data.paymentDetails
+          };
+        }
+      }
+      
+      return null;
+    } catch (error) {
+      this.logger.error(`Failed to get payment session for patient ${patientId}: ${error.message}`);
+      return null;
+    }
+  }
+
+  /**
+   * Get all sessions for a patient (helper method)
+   */
+  private async getAllSessionsForPatient(patientId: string): Promise<ConsultationSession[]> {
+    try {
+      // This is a simplified implementation
+      // In production, you might want to maintain a separate index of sessions by patient
+      const sessions: ConsultationSession[] = [];
+      
+      // For now, we'll return an empty array as this is a complex operation
+      // In a real implementation, you'd query your cache service for sessions by patient
+      this.logger.debug(`Getting sessions for patient: ${patientId} (simplified implementation)`);
+      
+      return sessions;
+    } catch (error) {
+      this.logger.error(`Failed to get sessions for patient ${patientId}: ${error.message}`);
+      return [];
+    }
+  }
+
+  /**
    * Validate clinical session for specific phase and consultation
    */
   async validateClinicalSession(
@@ -325,7 +381,7 @@ export class SessionManagerService {
 
   // ========== PRIVATE HELPER METHODS ==========
 
-  private async storeSession(sessionId: string, session: ConsultationSession): Promise<void> {
+  async storeSession(sessionId: string, session: ConsultationSession): Promise<void> {
     const cacheKey = `${this.SESSION_PREFIX}${sessionId}`;
     await this.cacheService.set(cacheKey, session, this.SESSION_TTL);
   }
