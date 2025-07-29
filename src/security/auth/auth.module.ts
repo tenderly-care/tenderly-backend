@@ -27,7 +27,9 @@ import { AuditService } from '../audit/audit.service';
       useFactory: async (configService: ConfigService) => ({
         secret: configService.get<string>('security.jwt.secret'),
         signOptions: {
-          expiresIn: configService.get<string>('security.jwt.accessTokenExpiry'),
+          expiresIn: configService.get<string>(
+            'security.jwt.accessTokenExpiry',
+          ),
           issuer: configService.get<string>('security.jwt.issuer'),
           audience: configService.get<string>('security.jwt.audience'),
         },

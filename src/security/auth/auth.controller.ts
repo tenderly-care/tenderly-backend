@@ -13,7 +13,12 @@ import {
   Param,
   Query,
 } from '@nestjs/common';
-import { ApiTags, ApiOperation, ApiResponse, ApiBearerAuth } from '@nestjs/swagger';
+import {
+  ApiTags,
+  ApiOperation,
+  ApiResponse,
+  ApiBearerAuth,
+} from '@nestjs/swagger';
 import { Request } from 'express';
 
 import { AuthService } from './auth.service';
@@ -40,7 +45,11 @@ import {
   MFASetupResponseDto,
 } from './dto/auth.dto';
 
-import { User, UserRole, UserDocument } from '../../modules/users/schemas/user.schema';
+import {
+  User,
+  UserRole,
+  UserDocument,
+} from '../../modules/users/schemas/user.schema';
 
 @ApiTags('Authentication')
 @Controller('auth')
@@ -55,7 +64,11 @@ export class AuthController {
   @Public()
   @Post('register')
   @ApiOperation({ summary: 'Register a new user' })
-  @ApiResponse({ status: 201, description: 'User registered successfully', type: AuthResponseDto })
+  @ApiResponse({
+    status: 201,
+    description: 'User registered successfully',
+    type: AuthResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'Bad request' })
   @ApiResponse({ status: 409, description: 'User already exists' })
   async register(
@@ -64,7 +77,7 @@ export class AuthController {
   ): Promise<AuthResponseDto> {
     const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
     const userAgent = req.headers['user-agent'] || 'unknown';
-    
+
     return this.authService.register(registerDto, ipAddress, userAgent);
   }
 
@@ -72,7 +85,11 @@ export class AuthController {
   @Post('login')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Login user' })
-  @ApiResponse({ status: 200, description: 'Login successful', type: AuthResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Login successful',
+    type: AuthResponseDto,
+  })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
   async login(
     @Body(ValidationPipe) loginDto: LoginDto,
@@ -80,7 +97,7 @@ export class AuthController {
   ): Promise<AuthResponseDto> {
     const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
     const userAgent = req.headers['user-agent'] || 'unknown';
-    
+
     return this.authService.login(loginDto, ipAddress, userAgent);
   }
 
@@ -88,14 +105,18 @@ export class AuthController {
   @Post('refresh')
   @HttpCode(HttpStatus.OK)
   @ApiOperation({ summary: 'Refresh access token' })
-  @ApiResponse({ status: 200, description: 'Token refreshed successfully', type: AuthResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'Token refreshed successfully',
+    type: AuthResponseDto,
+  })
   @ApiResponse({ status: 401, description: 'Invalid refresh token' })
   async refreshToken(
     @Body(ValidationPipe) refreshTokenDto: RefreshTokenDto,
     @Req() req: Request,
   ): Promise<AuthResponseDto> {
     const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
-    
+
     return this.authService.refreshToken(refreshTokenDto, ipAddress);
   }
 
@@ -112,10 +133,15 @@ export class AuthController {
     // Extract token from Authorization header
     const authHeader = req.headers.authorization;
     const token = authHeader?.split(' ')[1];
-    
+
     // If no refresh token in body, we need to invalidate the session (which we're already doing)
     // But we should also invalidate all refresh tokens for this user unless specific one is provided
-    await this.authService.logout((user._id as any).toString(), body?.refreshToken, body?.allDevices || !body?.refreshToken, token);
+    await this.authService.logout(
+      (user._id as any).toString(),
+      body?.refreshToken,
+      body?.allDevices || !body?.refreshToken,
+      token,
+    );
   }
 
   @Get('me')
@@ -170,20 +196,30 @@ export class AuthController {
     @GetUser() user: UserDocument,
     @Body(ValidationPipe) changePasswordDto: ChangePasswordDto,
   ): Promise<{ message: string }> {
-    return this.authService.changePassword((user._id as any).toString(), changePasswordDto);
+    return this.authService.changePassword(
+      (user._id as any).toString(),
+      changePasswordDto,
+    );
   }
 
   // MFA Endpoints
   @Post('mfa/setup')
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Initialize MFA setup' })
-  @ApiResponse({ status: 200, description: 'MFA setup initialized', type: MFASetupResponseDto })
+  @ApiResponse({
+    status: 200,
+    description: 'MFA setup initialized',
+    type: MFASetupResponseDto,
+  })
   @ApiResponse({ status: 400, description: 'MFA not required for this user' })
   async setupMFA(
     @GetUser() user: UserDocument,
     @Body(ValidationPipe) setupMFADto: SetupMFADto,
   ): Promise<MFASetupResponseDto> {
-    return this.mfaService.initializeMFASetup((user._id as any).toString(), setupMFADto.method);
+    return this.mfaService.initializeMFASetup(
+      (user._id as any).toString(),
+      setupMFADto.method,
+    );
   }
 
   @Post('mfa/verify-setup')
@@ -191,7 +227,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Verify and complete MFA setup' })
   @ApiResponse({ status: 200, description: 'MFA setup completed successfully' })
   @ApiResponse({ status: 400, description: 'Invalid verification code' })
-  @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.SUPER_DOC)
   async verifyMFASetup(
     @GetUser() user: UserDocument,
     @Body(ValidationPipe) verifyMFASetupDto: VerifyMFASetupDto,
@@ -201,8 +237,12 @@ export class AuthController {
       verifyMFASetupDto.method,
       verifyMFASetupDto.code,
     );
-    
-    return { message: success ? 'MFA setup completed successfully' : 'MFA setup failed' };
+
+    return {
+      message: success
+        ? 'MFA setup completed successfully'
+        : 'MFA setup failed',
+    };
   }
 
   @Post('mfa/generate-login-code')
@@ -225,7 +265,11 @@ export class AuthController {
     @GetUser() user: UserDocument,
     @Body(ValidationPipe) disableMFADto: DisableMFADto,
   ): Promise<{ message: string }> {
-    await this.mfaService.disableMFA((user._id as any).toString(), disableMFADto.password, disableMFADto.mfaCode);
+    await this.mfaService.disableMFA(
+      (user._id as any).toString(),
+      disableMFADto.password,
+      disableMFADto.mfaCode,
+    );
     return { message: 'MFA disabled successfully' };
   }
 
@@ -247,7 +291,7 @@ export class AuthController {
       parseInt(limit),
       parseInt(offset),
       category,
-      action
+      action,
     );
     return result;
   }
@@ -283,16 +327,16 @@ export class AuthController {
     @Req() req: Request,
   ): Promise<{ message: string }> {
     const ipAddress = req.ip || req.connection.remoteAddress || 'unknown';
-    
+
     user.addTrustedDevice(
       Math.random().toString(36),
       body.deviceName,
       body.deviceFingerprint,
       ipAddress,
     );
-    
+
     await user.save();
-    
+
     return { message: 'Device verified and added to trusted devices' };
   }
 }

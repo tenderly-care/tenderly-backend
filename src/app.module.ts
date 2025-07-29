@@ -16,6 +16,10 @@ import { AuthModule } from './security/auth/auth.module';
 import { JwtAuthGuard } from './shared/guards/jwt-auth.guard';
 import { RolesGuard } from './shared/guards/roles.guard';
 
+// Feature modules
+import { ConsultationModule } from './modules/consultations/consultation.module';
+import { UsersModule } from './modules/users/users.module';
+
 @Module({
   imports: [
     // Configuration
@@ -24,7 +28,7 @@ import { RolesGuard } from './shared/guards/roles.guard';
       load: [configuration],
       envFilePath: ['.env.local', '.env'],
     }),
-    
+
     // Rate limiting
     ThrottlerModule.forRoot([
       {
@@ -32,13 +36,17 @@ import { RolesGuard } from './shared/guards/roles.guard';
         limit: 100, // 100 requests per minute
       },
     ]),
-    
+
     // Core modules
     DatabaseModule,
     CacheModule,
-    
+
     // Security modules
     AuthModule,
+
+    // Feature modules
+    ConsultationModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [
