@@ -55,7 +55,7 @@ export class DoctorShiftController {
     description: 'Insufficient permissions' 
   })
   @ApiBody({ type: CreateDoctorShiftDto })
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SUPER_DOC)
   async createOrUpdateShift(
     @Body() createDoctorShiftDto: CreateDoctorShiftDto,
     @GetUser() user: any,
@@ -82,7 +82,7 @@ export class DoctorShiftController {
     status: HttpStatus.OK, 
     description: 'Doctor shifts retrieved successfully' 
   })
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.HEALTHCARE_PROVIDER)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SUPER_DOC, UserRole.HEALTHCARE_PROVIDER)
   async getAllShifts() {
     return await this.doctorShiftService.getAllShifts();
   }
@@ -96,7 +96,7 @@ export class DoctorShiftController {
     status: HttpStatus.OK, 
     description: 'Current active doctor retrieved successfully' 
   })
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.HEALTHCARE_PROVIDER)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SUPER_DOC, UserRole.HEALTHCARE_PROVIDER)
   async getCurrentActiveDoctor() {
     const doctorId = await this.doctorShiftService.getActiveDoctorForCurrentTime();
     return {
@@ -124,7 +124,7 @@ export class DoctorShiftController {
     status: HttpStatus.NOT_FOUND, 
     description: 'Shift not found' 
   })
-  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN, UserRole.SUPER_DOC)
   async updateShiftStatus(
     @Param('shiftType') shiftType: ShiftType,
     @Body() updateData: { status: ShiftStatus },

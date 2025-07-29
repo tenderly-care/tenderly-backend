@@ -18,6 +18,7 @@ import { RolesGuard } from './shared/guards/roles.guard';
 
 // Feature modules
 import { ConsultationModule } from './modules/consultations/consultation.module';
+import { UsersModule } from './modules/users/users.module';
 
 @Module({
   imports: [
@@ -45,6 +46,7 @@ import { ConsultationModule } from './modules/consultations/consultation.module'
 
     // Feature modules
     ConsultationModule,
+    UsersModule,
   ],
   controllers: [AppController],
   providers: [

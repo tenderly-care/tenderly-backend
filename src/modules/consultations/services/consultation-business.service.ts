@@ -1,4 +1,4 @@
-import { Injectable, Logger, BadRequestException, ConflictException } from '@nestjs/common';
+import { Injectable, Logger, BadRequestException, ConflictException, InternalServerErrorException } from '@nestjs/common';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { Consultation, ConsultationStatus, ConsultationType, ConsultationPriority } from '../schemas/consultation.schema';
@@ -12,11 +12,27 @@ export class ConsultationBusinessService {
   ) {}
 
   /**
+   * Validate if patient ID is a valid ObjectId
+   */
+  private validatePatientId(patientId: string): void {
+    if (!patientId || typeof patientId !== 'string') {
+      throw new BadRequestException('Patient ID is required and must be a string');
+    }
+    
+    if (!Types.ObjectId.isValid(patientId)) {
+      throw new BadRequestException('Invalid patient ID format');
+    }
+  }
+
+  /**
    * Check if patient has an active consultation
    */
   async hasActiveConsultation(patientId: string): Promise<boolean> {
     try {
       this.logger.log(`Checking active consultation for patient: ${patientId}`);
+      
+      // Validate patient ID format
+      this.validatePatientId(patientId);
       
       const activeConsultation = await this.consultationModel.findOne({
         patientId: new Types.ObjectId(patientId),
@@ -40,7 +56,14 @@ export class ConsultationBusinessService {
       return hasActive;
     } catch (error) {
       this.logger.error(`Error checking active consultation for patient ${patientId}:`, error.message);
-      throw new Error(`Failed to fetch consultation: ${error.message}`);
+      
+      // Re-throw known exceptions
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      // Wrap unknown errors in InternalServerErrorException
+      throw new InternalServerErrorException(`Failed to check active consultation: ${error.message}`);
     }
   }
 
@@ -50,6 +73,9 @@ export class ConsultationBusinessService {
   async getActiveConsultation(patientId: string): Promise<Consultation | null> {
     try {
       this.logger.log(`Getting active consultation for patient: ${patientId}`);
+      
+      // Validate patient ID format
+      this.validatePatientId(patientId);
       
       const result = await this.consultationModel.findOne({
         patientId: new Types.ObjectId(patientId),
@@ -72,7 +98,14 @@ export class ConsultationBusinessService {
       return result;
     } catch (error) {
       this.logger.error(`Error getting active consultation for patient ${patientId}:`, error.message);
-      throw new Error(`Failed to fetch consultation: ${error.message}`);
+      
+      // Re-throw known exceptions
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      // Wrap unknown errors in InternalServerErrorException
+      throw new InternalServerErrorException(`Failed to get active consultation: ${error.message}`);
     }
   }
 
@@ -94,6 +127,12 @@ export class ConsultationBusinessService {
    * Activate a consultation (deactivate others first)
    */
   async activateConsultation(consultationId: string, patientId: string, reason?: string): Promise<void> {
+    // Validate IDs
+    this.validatePatientId(patientId);
+    if (!consultationId || !Types.ObjectId.isValid(consultationId)) {
+      throw new BadRequestException('Invalid consultation ID format');
+    }
+    
     // Deactivate all other consultations for this patient
     await this.consultationModel.updateMany(
       {
@@ -162,6 +201,14 @@ export class ConsultationBusinessService {
     reason?: string,
     metadata?: any
   ): Promise<void> {
+    // Validate IDs
+    if (!consultationId || !Types.ObjectId.isValid(consultationId)) {
+      throw new BadRequestException('Invalid consultation ID format');
+    }
+    if (!changedBy || !Types.ObjectId.isValid(changedBy)) {
+      throw new BadRequestException('Invalid user ID format');
+    }
+    
     const consultation = await this.consultationModel.findById(consultationId);
     
     if (!consultation) {
@@ -283,6 +330,9 @@ export class ConsultationBusinessService {
     try {
       this.logger.log(`Getting consultation stats for patient: ${patientId}`);
       
+      // Validate patient ID format
+      this.validatePatientId(patientId);
+      
       const stats = await this.consultationModel.aggregate([
         {
           $match: {
@@ -340,7 +390,14 @@ export class ConsultationBusinessService {
       return result;
     } catch (error) {
       this.logger.error(`Error getting consultation stats for patient ${patientId}:`, error.message);
-      throw new Error(`Failed to fetch consultation: ${error.message}`);
+      
+      // Re-throw known exceptions
+      if (error instanceof BadRequestException) {
+        throw error;
+      }
+      
+      // Wrap unknown errors in InternalServerErrorException
+      throw new InternalServerErrorException(`Failed to get consultation stats: ${error.message}`);
     }
   }
 
@@ -350,6 +407,9 @@ export class ConsultationBusinessService {
   async checkConsultationConflicts(patientId: string): Promise<any> {
     try {
       this.logger.log(`Checking consultation conflicts for patient: ${patientId}`);
+      
+      // Validate patient ID format
+      this.validatePatientId(patientId);
       
       const conflicts: {
         hasActiveConsultation: boolean;
@@ -413,7 +473,14 @@ export class ConsultationBusinessService {
       return conflicts;
     } catch (error) {
       this.logger.error(`Error checking consultation conflicts for patient ${patientId}:`, error.message);
-      throw new Error(`Failed to fetch consultation: ${error.message}`);
+      
+      // Re-throw known exceptions
+      if (error instanceof BadRequestException || error instanceof InternalServerErrorException) {
+        throw error;
+      }
+      
+      // Wrap unknown errors in InternalServerErrorException
+      throw new InternalServerErrorException(`Failed to check consultation conflicts: ${error.message}`);
     }
   }
 

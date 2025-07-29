@@ -34,6 +34,7 @@ export enum UserRole {
   HEALTHCARE_PROVIDER = 'healthcare_provider',
   ADMIN = 'admin',
   SUPER_ADMIN = 'super_admin',
+  SUPER_DOC = 'super_doc',
   SYSTEM = 'system',
 }
 
@@ -51,6 +52,7 @@ export const MFA_REQUIRED_ROLES = [
   UserRole.HEALTHCARE_PROVIDER,
   UserRole.ADMIN,
   UserRole.SUPER_ADMIN,
+  UserRole.SUPER_DOC,
 ];
 
 @Schema({ timestamps: true })

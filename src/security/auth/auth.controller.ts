@@ -227,7 +227,7 @@ export class AuthController {
   @ApiOperation({ summary: 'Verify and complete MFA setup' })
   @ApiResponse({ status: 200, description: 'MFA setup completed successfully' })
   @ApiResponse({ status: 400, description: 'Invalid verification code' })
-  @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.ADMIN, UserRole.SUPER_ADMIN)
+  @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.SUPER_DOC)
   async verifyMFASetup(
     @GetUser() user: UserDocument,
     @Body(ValidationPipe) verifyMFASetupDto: VerifyMFASetupDto,
