@@ -432,6 +432,57 @@ export class UpdateConsultationStatusDto {
   notes?: string;
 }
 
+export class AdminUpdateConsultationStatusDto {
+  @ApiProperty({ 
+    enum: ConsultationStatus,
+    description: 'New consultation status to set'
+  })
+  @IsNotEmpty()
+  @IsEnum(ConsultationStatus)
+  status: ConsultationStatus;
+
+  @ApiProperty({ 
+    example: 'Administrative override - urgent medical review required',
+    description: 'Reason for the status change (required for admin changes)'
+  })
+  @IsNotEmpty()
+  @IsString()
+  reason: string;
+
+  @ApiPropertyOptional({ 
+    example: 'Patient reported severe symptoms requiring immediate attention',
+    description: 'Additional notes about the administrative action'
+  })
+  @IsOptional()
+  @IsString()
+  adminNotes?: string;
+
+  @ApiPropertyOptional({ 
+    example: 'override_business_rules',
+    enum: ['standard_flow', 'override_business_rules', 'emergency_intervention', 'data_correction'],
+    description: 'Type of administrative action being performed'
+  })
+  @IsOptional()
+  @IsEnum(['standard_flow', 'override_business_rules', 'emergency_intervention', 'data_correction'])
+  actionType?: string;
+
+  @ApiPropertyOptional({ 
+    example: 'doctor_user_id_here',
+    description: 'Optional: Assign/reassign doctor during status change'
+  })
+  @IsOptional()
+  @IsString()
+  assignDoctorId?: string;
+
+  @ApiPropertyOptional({ 
+    example: true,
+    description: 'Whether to send notifications about this status change'
+  })
+  @IsOptional()
+  @IsBoolean()
+  sendNotification?: boolean;
+}
+
 // Prescription DTOs
 export class MedicationDto {
   @ApiProperty({ example: 'Amoxicillin' })

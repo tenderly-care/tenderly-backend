@@ -31,7 +31,8 @@ import { Public } from '../../../shared/decorators/public.decorator';
 import { ConsultationService } from '../services/consultation.service';
 import { 
   CreateConsultationDto, 
-  UpdateConsultationStatusDto 
+  UpdateConsultationStatusDto,
+  AdminUpdateConsultationStatusDto
 } from '../dto/new-consultation.dto';
 import { 
   AIAgentSymptomCollectionDto, 
@@ -85,6 +86,47 @@ export class ConsultationController {
       createConsultationDto,
       user.id
     );
+  }
+
+  @Patch('admin/:consultationId/status')
+  @ApiOperation({ 
+    summary: 'Admin update consultation status',
+    description: 'Allow super_admin and super_doc roles to change consultation status'
+  })
+  @ApiBody({ type: AdminUpdateConsultationStatusDto })
+  @Roles(UserRole.SUPER_ADMIN, UserRole.SUPER_DOC)
+  async adminUpdateConsultationStatus(
+    @Param('consultationId') consultationId: string,
+    @Body() adminUpdateStatusDto: AdminUpdateConsultationStatusDto,
+    @GetUser() user: any,
+    @Req() req: Request
+  ) {
+    const requestMetadata = {
+      ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+      userAgent: req.headers['user-agent'] || 'unknown'
+    };
+
+    await this.consultationService.updateConsultationStatus(
+      consultationId,
+      adminUpdateStatusDto.status,
+      user.id,
+      adminUpdateStatusDto.reason,
+      {
+        source: 'api',
+        trigger: 'admin_status_update',
+        adminNotes: adminUpdateStatusDto.adminNotes,
+        actionType: adminUpdateStatusDto.actionType,
+        assignDoctorId: adminUpdateStatusDto.assignDoctorId,
+        sendNotification: adminUpdateStatusDto.sendNotification
+      }
+    );
+
+    return {
+      message: 'Admin consultation status updated successfully',
+      consultationId,
+      newStatus: adminUpdateStatusDto.status,
+      updatedAt: new Date()
+    };
   }
 
   @Get(':id')
