@@ -35,8 +35,22 @@ export class AuditLog {
   @Prop({ enum: ['low', 'medium', 'high', 'critical'], required: true })
   severity: 'low' | 'medium' | 'high' | 'critical';
 
-  @Prop({ enum: ['authentication', 'data_access', 'administration', 'security', 'system'], required: true })
-  category: 'authentication' | 'data_access' | 'administration' | 'security' | 'system';
+  @Prop({
+    enum: [
+      'authentication',
+      'data_access',
+      'administration',
+      'security',
+      'system',
+    ],
+    required: true,
+  })
+  category:
+    | 'authentication'
+    | 'data_access'
+    | 'administration'
+    | 'security'
+    | 'system';
 
   @Prop({ required: true })
   success: boolean;
@@ -62,7 +76,7 @@ export class AuditLog {
       gdpr: { type: Boolean, default: false },
       hipaa: { type: Boolean, default: false },
     },
-    required: true
+    required: true,
   })
   complianceFlags: {
     ndhm: boolean;

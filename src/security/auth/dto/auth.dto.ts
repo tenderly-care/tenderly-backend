@@ -1,4 +1,14 @@
-import { IsEmail, IsString, IsEnum, IsOptional, IsBoolean, MinLength, MaxLength, Matches, IsPhoneNumber } from 'class-validator';
+import {
+  IsEmail,
+  IsString,
+  IsEnum,
+  IsOptional,
+  IsBoolean,
+  MinLength,
+  MaxLength,
+  Matches,
+  IsPhoneNumber,
+} from 'class-validator';
 import { ApiProperty } from '@nestjs/swagger';
 import { UserRole } from '../../../modules/users/schemas/user.schema';
 
@@ -15,25 +25,32 @@ export class RegisterDto {
   @MaxLength(50)
   lastName: string;
 
-  @ApiProperty({ example: 'john.doe@example.com', description: 'Email address' })
+  @ApiProperty({
+    example: 'john.doe@example.com',
+    description: 'Email address',
+  })
   @IsEmail()
   email: string;
 
-  @ApiProperty({ example: '+919876543210', description: 'Phone number in E.164 format' })
+  @ApiProperty({
+    example: '+919876543210',
+    description: 'Phone number in E.164 format',
+  })
   @IsPhoneNumber('IN')
   phone: string;
 
-  @ApiProperty({ 
-    example: 'SecurePass123!', 
-    description: 'Password (min 8 chars, must include uppercase, lowercase, number, special char)' 
+  @ApiProperty({
+    example: 'SecurePass123!',
+    description:
+      'Password (min 8 chars, must include uppercase, lowercase, number, special char)',
   })
   @IsString()
   @MinLength(8)
   @MaxLength(128)
-  @Matches(
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
-    { message: 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character' }
-  )
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/, {
+    message:
+      'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
+  })
   password: string;
 
   @ApiProperty({ example: 'patient', enum: UserRole, description: 'User role' })
@@ -41,12 +58,18 @@ export class RegisterDto {
   @IsOptional()
   role?: UserRole;
 
-  @ApiProperty({ example: 'MED123456', description: 'Medical license number (required for healthcare providers)' })
+  @ApiProperty({
+    example: 'MED123456',
+    description: 'Medical license number (required for healthcare providers)',
+  })
   @IsString()
   @IsOptional()
   medicalLicenseNumber?: string;
 
-  @ApiProperty({ example: ['gynecology', 'obstetrics'], description: 'Specializations (for healthcare providers)' })
+  @ApiProperty({
+    example: ['gynecology', 'obstetrics'],
+    description: 'Specializations (for healthcare providers)',
+  })
   @IsOptional()
   specializations?: string[];
 
@@ -63,7 +86,10 @@ export class RegisterDto {
 }
 
 export class LoginDto {
-  @ApiProperty({ example: 'john.doe@example.com', description: 'Email address' })
+  @ApiProperty({
+    example: 'john.doe@example.com',
+    description: 'Email address',
+  })
   @IsEmail()
   email: string;
 
@@ -110,27 +136,33 @@ export class RefreshTokenDto {
 }
 
 export class ForgotPasswordDto {
-  @ApiProperty({ example: 'john.doe@example.com', description: 'Email address' })
+  @ApiProperty({
+    example: 'john.doe@example.com',
+    description: 'Email address',
+  })
   @IsEmail()
   email: string;
 }
 
 export class ResetPasswordDto {
-  @ApiProperty({ example: 'reset_token_here', description: 'Password reset token' })
+  @ApiProperty({
+    example: 'reset_token_here',
+    description: 'Password reset token',
+  })
   @IsString()
   token: string;
 
-  @ApiProperty({ 
-    example: 'NewSecurePass123!', 
-    description: 'New password' 
+  @ApiProperty({
+    example: 'NewSecurePass123!',
+    description: 'New password',
   })
   @IsString()
   @MinLength(8)
   @MaxLength(128)
-  @Matches(
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
-    { message: 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character' }
-  )
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/, {
+    message:
+      'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
+  })
   newPassword: string;
 }
 
@@ -139,46 +171,63 @@ export class ChangePasswordDto {
   @IsString()
   currentPassword: string;
 
-  @ApiProperty({ 
-    example: 'NewSecurePass123!', 
-    description: 'New password' 
+  @ApiProperty({
+    example: 'NewSecurePass123!',
+    description: 'New password',
   })
   @IsString()
   @MinLength(8)
   @MaxLength(128)
-  @Matches(
-    /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/,
-    { message: 'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character' }
-  )
+  @Matches(/^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]/, {
+    message:
+      'Password must contain at least one uppercase letter, one lowercase letter, one number, and one special character',
+  })
   newPassword: string;
 }
 
 export class VerifyEmailDto {
-  @ApiProperty({ example: 'verification_token_here', description: 'Email verification token' })
+  @ApiProperty({
+    example: 'verification_token_here',
+    description: 'Email verification token',
+  })
   @IsString()
   token: string;
 }
 
 export class SetupMFADto {
-  @ApiProperty({ example: 'authenticator', enum: ['sms', 'email', 'authenticator'], description: 'MFA method' })
+  @ApiProperty({
+    example: 'authenticator',
+    enum: ['sms', 'email', 'authenticator'],
+    description: 'MFA method',
+  })
   @IsEnum(['sms', 'email', 'authenticator'])
   method: 'sms' | 'email' | 'authenticator';
 }
 
 export class VerifyMFASetupDto {
-  @ApiProperty({ example: '123456', description: 'MFA verification code (6 digits for TOTP/SMS/Email, 8 characters for backup codes)' })
+  @ApiProperty({
+    example: '123456',
+    description:
+      'MFA verification code (6 digits for TOTP/SMS/Email, 8 characters for backup codes)',
+  })
   @IsString()
   @MinLength(6)
   @MaxLength(8)
   code: string;
 
-  @ApiProperty({ example: 'authenticator', description: 'MFA method being verified' })
+  @ApiProperty({
+    example: 'authenticator',
+    description: 'MFA method being verified',
+  })
   @IsEnum(['sms', 'email', 'authenticator'])
   method: 'sms' | 'email' | 'authenticator';
 }
 
 export class DisableMFADto {
-  @ApiProperty({ example: 'CurrentPass123!', description: 'Current password for confirmation' })
+  @ApiProperty({
+    example: 'CurrentPass123!',
+    description: 'Current password for confirmation',
+  })
   @IsString()
   password: string;
 

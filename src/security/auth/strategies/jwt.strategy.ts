@@ -19,7 +19,8 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     const strategyOptions: StrategyOptions = {
       jwtFromRequest: ExtractJwt.fromAuthHeaderAsBearerToken(),
       ignoreExpiration: false,
-      secretOrKey: configService.get<string>('security.jwt.secret') || 'fallback-secret',
+      secretOrKey:
+        configService.get<string>('security.jwt.secret') || 'fallback-secret',
     };
     super(strategyOptions);
   }
@@ -38,18 +39,23 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     }
 
     // Check if there's a token version mismatch (global logout)
-    const tokenVersion = await this.cacheService.get(`token_version:${payload.sub}`);
+    const tokenVersion = await this.cacheService.get(
+      `token_version:${payload.sub}`,
+    );
     if (tokenVersion && payload.iat * 1000 < tokenVersion) {
       throw new UnauthorizedException('Token invalidated');
     }
 
     // Allow users with pending MFA setup to access MFA setup endpoints
     // The endpoint-specific logic will handle MFA requirements
-    if (user.requiresMFA() && !user.isMFAEnabled && user.accountStatus !== 'pending_mfa_setup') {
+    if (
+      user.requiresMFA() &&
+      !user.isMFAEnabled &&
+      user.accountStatus !== 'pending_mfa_setup'
+    ) {
       throw new UnauthorizedException('MFA is required but not enabled');
     }
 
     return user;
   }
 }
-

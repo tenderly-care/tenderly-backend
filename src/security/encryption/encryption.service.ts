@@ -21,15 +21,27 @@ export class EncryptionService {
   private readonly masterKey: string;
 
   constructor(private configService: ConfigService) {
-    this.algorithm = this.configService.get<string>('security.encryption.algorithm') || 'aes-256-gcm';
-    this.keySize = this.configService.get<number>('security.encryption.keySize') || 32;
-    this.ivSize = this.configService.get<number>('security.encryption.ivSize') || 16;
-    this.tagSize = this.configService.get<number>('security.encryption.tagSize') || 16;
-    this.iterations = this.configService.get<number>('security.encryption.keyDerivationIterations') || 100000;
-    this.masterKey = this.configService.get<string>('security.encryption.dataEncryptionKey') || 'change-this-key-in-production';
+    this.algorithm =
+      this.configService.get<string>('security.encryption.algorithm') ||
+      'aes-256-gcm';
+    this.keySize =
+      this.configService.get<number>('security.encryption.keySize') || 32;
+    this.ivSize =
+      this.configService.get<number>('security.encryption.ivSize') || 16;
+    this.tagSize =
+      this.configService.get<number>('security.encryption.tagSize') || 16;
+    this.iterations =
+      this.configService.get<number>(
+        'security.encryption.keyDerivationIterations',
+      ) || 100000;
+    this.masterKey =
+      this.configService.get<string>('security.encryption.dataEncryptionKey') ||
+      'change-this-key-in-production';
 
     if (!this.masterKey || this.masterKey === 'change-this-key-in-production') {
-      this.logger.warn('Using default encryption key. Please set DATA_ENCRYPTION_KEY in production!');
+      this.logger.warn(
+        'Using default encryption key. Please set DATA_ENCRYPTION_KEY in production!',
+      );
     }
   }
 
@@ -37,7 +49,13 @@ export class EncryptionService {
    * Derives an encryption key from the master key using PBKDF2
    */
   private deriveKey(salt: Buffer): Buffer {
-    return crypto.pbkdf2Sync(this.masterKey, salt, this.iterations, this.keySize, 'sha512');
+    return crypto.pbkdf2Sync(
+      this.masterKey,
+      salt,
+      this.iterations,
+      this.keySize,
+      'sha512',
+    );
   }
 
   /**
@@ -52,18 +70,22 @@ export class EncryptionService {
       // Generate random salt and IV
       const salt = crypto.randomBytes(16);
       const iv = crypto.randomBytes(this.ivSize);
-      
+
       // Derive encryption key
       const key = this.deriveKey(salt);
-      
+
       // Create cipher with proper GCM mode
-      const cipher = crypto.createCipheriv(this.algorithm, key, iv) as crypto.CipherGCM;
+      const cipher = crypto.createCipheriv(
+        this.algorithm,
+        key,
+        iv,
+      ) as crypto.CipherGCM;
       cipher.setAAD(salt); // Additional authenticated data
-      
+
       // Encrypt data
       let encrypted = cipher.update(data, 'utf8', 'hex');
       encrypted += cipher.final('hex');
-      
+
       // Get authentication tag
       const tag = cipher.getAuthTag();
 
@@ -92,19 +114,23 @@ export class EncryptionService {
       const combined = Buffer.from(encryptedData.iv, 'hex');
       const salt = combined.slice(0, 16);
       const iv = combined.slice(16);
-      
+
       // Derive decryption key
       const key = this.deriveKey(salt);
-      
+
       // Create decipher
-      const decipher = crypto.createDecipheriv(encryptedData.algorithm, key, iv) as crypto.DecipherGCM;
+      const decipher = crypto.createDecipheriv(
+        encryptedData.algorithm,
+        key,
+        iv,
+      ) as crypto.DecipherGCM;
       decipher.setAAD(salt);
       decipher.setAuthTag(Buffer.from(encryptedData.tag, 'hex'));
-      
+
       // Decrypt data
       let decrypted = decipher.update(encryptedData.encrypted, 'hex', 'utf8');
       decrypted += decipher.final('utf8');
-      
+
       return decrypted;
     } catch (error) {
       this.logger.error('Decryption failed:', error);
@@ -147,8 +173,14 @@ export class EncryptionService {
    */
   verifyHMAC(data: string, signature: string, secret?: string): boolean {
     const key = secret || this.masterKey;
-    const expectedSignature = crypto.createHmac('sha256', key).update(data).digest('hex');
-    return crypto.timingSafeEqual(Buffer.from(signature), Buffer.from(expectedSignature));
+    const expectedSignature = crypto
+      .createHmac('sha256', key)
+      .update(data)
+      .digest('hex');
+    return crypto.timingSafeEqual(
+      Buffer.from(signature),
+      Buffer.from(expectedSignature),
+    );
   }
 
   /**

@@ -1,9 +1,9 @@
-import { 
-  Injectable, 
-  UnauthorizedException, 
-  BadRequestException, 
+import {
+  Injectable,
+  UnauthorizedException,
+  BadRequestException,
   ConflictException,
-  Logger 
+  Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
 import { InjectModel } from '@nestjs/mongoose';
@@ -12,24 +12,32 @@ import { ConfigService } from '@nestjs/config';
 import * as bcrypt from 'bcryptjs';
 import * as crypto from 'crypto';
 
-import { User, UserDocument, UserRole, AccountStatus } from '../../modules/users/schemas/user.schema';
+import {
+  User,
+  UserDocument,
+  UserRole,
+  AccountStatus,
+} from '../../modules/users/schemas/user.schema';
 import { EncryptionService } from '../encryption/encryption.service';
 import { CacheService } from '../../core/cache/cache.service';
 import { AuditService } from '../audit/audit.service';
 import { MFAService } from './services/mfa.service';
 
-import { 
-  RegisterDto, 
-  LoginDto, 
-  AuthResponseDto, 
+import {
+  RegisterDto,
+  LoginDto,
+  AuthResponseDto,
   RefreshTokenDto,
   ForgotPasswordDto,
   ResetPasswordDto,
   ChangePasswordDto,
-  VerifyEmailDto
+  VerifyEmailDto,
 } from './dto/auth.dto';
 
-import { JwtPayload, RefreshTokenPayload } from './interfaces/jwt-payload.interface';
+import {
+  JwtPayload,
+  RefreshTokenPayload,
+} from './interfaces/jwt-payload.interface';
 
 @Injectable()
 export class AuthService {
@@ -48,25 +56,42 @@ export class AuthService {
   /**
    * User registration with role-based requirements
    */
-  async register(registerDto: RegisterDto, ipAddress: string, userAgent: string): Promise<AuthResponseDto> {
-    const { email, phone, password, role = UserRole.PATIENT, medicalLicenseNumber, specializations } = registerDto;
+  async register(
+    registerDto: RegisterDto,
+    ipAddress: string,
+    userAgent: string,
+  ): Promise<AuthResponseDto> {
+    const {
+      email,
+      phone,
+      password,
+      role = UserRole.PATIENT,
+      medicalLicenseNumber,
+      specializations,
+    } = registerDto;
 
     // Check if user already exists
     const existingUser = await this.userModel.findOne({
-      $or: [{ email }, { phone }]
+      $or: [{ email }, { phone }],
     });
 
     if (existingUser) {
-      throw new ConflictException('User with this email or phone already exists');
+      throw new ConflictException(
+        'User with this email or phone already exists',
+      );
     }
 
     // Validate healthcare provider requirements
     if (role === UserRole.HEALTHCARE_PROVIDER) {
       if (!medicalLicenseNumber) {
-        throw new BadRequestException('Medical license number is required for healthcare providers');
+        throw new BadRequestException(
+          'Medical license number is required for healthcare providers',
+        );
       }
       if (!specializations || specializations.length === 0) {
-        throw new BadRequestException('At least one specialization is required for healthcare providers');
+        throw new BadRequestException(
+          'At least one specialization is required for healthcare providers',
+        );
       }
     }
 
@@ -80,10 +105,13 @@ export class AuthService {
         password, // Will be hashed by pre-save middleware
         roles: [role],
         accountStatus: AccountStatus.PENDING_VERIFICATION,
-        professionalInfo: role === UserRole.HEALTHCARE_PROVIDER ? {
-          medicalLicenseNumber,
-          specialization: specializations,
-        } : undefined,
+        professionalInfo:
+          role === UserRole.HEALTHCARE_PROVIDER
+            ? {
+                medicalLicenseNumber,
+                specialization: specializations,
+              }
+            : undefined,
       });
 
       await user.save();
@@ -93,11 +121,13 @@ export class AuthService {
       await this.cacheService.set(
         `email_verification:${user._id}`,
         { token: verificationToken, email },
-        24 * 60 * 60 // 24 hours
+        24 * 60 * 60, // 24 hours
       );
 
       // Send verification email (TODO: implement email service)
-      this.logger.log(`Verification email should be sent to ${email} with token: ${verificationToken}`);
+      this.logger.log(
+        `Verification email should be sent to ${email} with token: ${verificationToken}`,
+      );
 
       // Log registration
       await this.auditService.logAuthEvent(
@@ -105,7 +135,7 @@ export class AuthService {
         'register',
         ipAddress,
         userAgent,
-        true
+        true,
       );
 
       // For healthcare providers, redirect to MFA setup
@@ -114,7 +144,12 @@ export class AuthService {
         await user.save();
       }
 
-      return this.generateAuthResponse(user, ipAddress, userAgent, registerDto.deviceFingerprint || undefined);
+      return this.generateAuthResponse(
+        user,
+        ipAddress,
+        userAgent,
+        registerDto.deviceFingerprint || undefined,
+      );
     } catch (error) {
       this.logger.error('Registration failed:', error);
       throw new BadRequestException('Registration failed');
@@ -124,8 +159,13 @@ export class AuthService {
   /**
    * User login with MFA support
    */
-  async login(loginDto: LoginDto, ipAddress: string, userAgent: string): Promise<AuthResponseDto> {
-    const { email, password, mfaCode, rememberDevice, deviceFingerprint } = loginDto;
+  async login(
+    loginDto: LoginDto,
+    ipAddress: string,
+    userAgent: string,
+  ): Promise<AuthResponseDto> {
+    const { email, password, mfaCode, rememberDevice, deviceFingerprint } =
+      loginDto;
 
     const user = await this.userModel.findOne({ email }).select('+password');
     if (!user) {
@@ -135,7 +175,7 @@ export class AuthService {
         ipAddress,
         userAgent,
         false,
-        'User not found'
+        'User not found',
       );
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -149,7 +189,7 @@ export class AuthService {
         ipAddress,
         userAgent,
         false,
-        loginCheck.reason
+        loginCheck.reason,
       );
       throw new UnauthorizedException(loginCheck.reason);
     }
@@ -164,7 +204,7 @@ export class AuthService {
         ipAddress,
         userAgent,
         false,
-        'Invalid password'
+        'Invalid password',
       );
       throw new UnauthorizedException('Invalid credentials');
     }
@@ -185,7 +225,7 @@ export class AuthService {
           ipAddress,
           userAgent,
           true,
-          'Password verified, MFA required'
+          'Password verified, MFA required',
         );
 
         return {
@@ -209,7 +249,10 @@ export class AuthService {
       }
 
       // Verify MFA code
-      mfaVerified = await this.mfaService.verifyLoginMFA((user._id as string).toString(), mfaCode);
+      mfaVerified = await this.mfaService.verifyLoginMFA(
+        (user._id as string).toString(),
+        mfaCode,
+      );
       if (!mfaVerified) {
         await this.auditService.logAuthEvent(
           (user._id as string).toString(),
@@ -217,14 +260,20 @@ export class AuthService {
           ipAddress,
           userAgent,
           false,
-          'Invalid MFA code'
+          'Invalid MFA code',
         );
         throw new UnauthorizedException('Invalid MFA code');
       }
     }
 
     // Add to login history
-    user.addLoginHistory(ipAddress, userAgent, true, mfaVerified, loginDto.location);
+    user.addLoginHistory(
+      ipAddress,
+      userAgent,
+      true,
+      mfaVerified,
+      loginDto.location,
+    );
 
     // Handle device trust
     if (deviceFingerprint) {
@@ -233,7 +282,7 @@ export class AuthService {
           this.generateDeviceId(),
           this.extractDeviceName(userAgent),
           deviceFingerprint,
-          loginDto.location
+          loginDto.location,
         );
       }
     }
@@ -247,40 +296,54 @@ export class AuthService {
       ipAddress,
       userAgent,
       true,
-      mfaVerified ? 'Login with MFA' : 'Login without MFA'
+      mfaVerified ? 'Login with MFA' : 'Login without MFA',
     );
 
-    return this.generateAuthResponse(user, ipAddress, userAgent, deviceFingerprint);
+    return this.generateAuthResponse(
+      user,
+      ipAddress,
+      userAgent,
+      deviceFingerprint,
+    );
   }
 
   /**
    * Refresh access token
    */
-  async refreshToken(refreshTokenDto: RefreshTokenDto, ipAddress: string): Promise<AuthResponseDto> {
+  async refreshToken(
+    refreshTokenDto: RefreshTokenDto,
+    ipAddress: string,
+  ): Promise<AuthResponseDto> {
     const { refreshToken, deviceFingerprint } = refreshTokenDto;
 
     try {
       // Verify refresh token
       const payload = this.jwtService.verify(refreshToken, {
         secret: this.configService.get<string>('security.jwt.secret'),
-      }) as RefreshTokenPayload;
+      });
 
       // Check if token is blacklisted
-      const isBlacklisted = await this.cacheService.get(`blacklist:${refreshToken}`);
+      const isBlacklisted = await this.cacheService.get(
+        `blacklist:${refreshToken}`,
+      );
       if (isBlacklisted) {
         throw new UnauthorizedException('Token is blacklisted');
       }
 
       // Check if session is still valid (same validation as JWT strategy)
       if (payload.sessionId) {
-        const sessionData = await this.cacheService.get(`session:${payload.sessionId}`);
+        const sessionData = await this.cacheService.get(
+          `session:${payload.sessionId}`,
+        );
         if (!sessionData) {
           throw new UnauthorizedException('Session expired or invalid');
         }
       }
 
       // Check if there's a token version mismatch (global logout)
-      const tokenVersion = await this.cacheService.get(`token_version:${payload.sub}`);
+      const tokenVersion = await this.cacheService.get(
+        `token_version:${payload.sub}`,
+      );
       if (tokenVersion && payload.iat * 1000 < tokenVersion) {
         throw new UnauthorizedException('Token invalidated');
       }
@@ -292,12 +355,15 @@ export class AuthService {
       }
 
       // Validate device fingerprint if provided
-      if (deviceFingerprint && payload.deviceFingerprint !== deviceFingerprint) {
+      if (
+        deviceFingerprint &&
+        payload.deviceFingerprint !== deviceFingerprint
+      ) {
         await this.auditService.logSecurityEvent(
           'suspicious_activity',
           { reason: 'Device fingerprint mismatch during token refresh' },
           (user._id as string).toString(),
-          ipAddress
+          ipAddress,
         );
         throw new UnauthorizedException('Invalid device');
       }
@@ -306,7 +372,11 @@ export class AuthService {
       await this.cacheService.set(
         `blacklist:${refreshToken}`,
         true,
-        (this.configService.get<number>('security.jwt.refreshTokenExpiry') || 7) * 24 * 60 * 60 // Convert days to seconds
+        (this.configService.get<number>('security.jwt.refreshTokenExpiry') ||
+          7) *
+          24 *
+          60 *
+          60, // Convert days to seconds
       );
 
       // Generate new tokens
@@ -320,11 +390,16 @@ export class AuthService {
   /**
    * Logout user and invalidate tokens
    */
-  async logout(userId: string, refreshToken?: string, allDevices: boolean = false, accessToken?: string): Promise<void> {
+  async logout(
+    userId: string,
+    refreshToken?: string,
+    allDevices: boolean = false,
+    accessToken?: string,
+  ): Promise<void> {
     try {
       // If we have an access token, decode it to get the session ID
       if (accessToken) {
-        const decoded = this.jwtService.decode(accessToken) as any;
+        const decoded = this.jwtService.decode(accessToken);
         if (decoded && decoded.sessionId) {
           // Invalidate the current session
           await this.cacheService.delete(`session:${decoded.sessionId}`);
@@ -337,14 +412,22 @@ export class AuthService {
         await this.cacheService.set(
           `blacklist:${refreshToken}`,
           true,
-          (this.configService.get<number>('security.jwt.refreshTokenExpiry') || 7) * 24 * 60 * 60
+          (this.configService.get<number>('security.jwt.refreshTokenExpiry') ||
+            7) *
+            24 *
+            60 *
+            60,
         );
         this.logger.debug(`Blacklisted refresh token`);
       }
 
       if (allDevices) {
         // Blacklist all tokens for user by incrementing token version
-        await this.cacheService.set(`token_version:${userId}`, Date.now(), 7 * 24 * 60 * 60);
+        await this.cacheService.set(
+          `token_version:${userId}`,
+          Date.now(),
+          7 * 24 * 60 * 60,
+        );
         this.logger.debug(`Invalidated all tokens for user: ${userId}`);
       }
 
@@ -354,7 +437,7 @@ export class AuthService {
         'unknown',
         'unknown',
         true,
-        allDevices ? 'Logout from all devices' : 'Logout from current device'
+        allDevices ? 'Logout from all devices' : 'Logout from current device',
       );
     } catch (error) {
       this.logger.error('Error during logout:', error);
@@ -365,7 +448,7 @@ export class AuthService {
         'unknown',
         'unknown',
         true,
-        'Logout completed with errors'
+        'Logout completed with errors',
       );
     }
   }
@@ -373,7 +456,9 @@ export class AuthService {
   /**
    * Verify email address
    */
-  async verifyEmail(verifyEmailDto: VerifyEmailDto): Promise<{ message: string }> {
+  async verifyEmail(
+    verifyEmailDto: VerifyEmailDto,
+  ): Promise<{ message: string }> {
     const { token } = verifyEmailDto;
 
     // Find verification data
@@ -407,7 +492,7 @@ export class AuthService {
       'email_verified',
       'unknown',
       'unknown',
-      true
+      true,
     );
 
     return { message: 'Email verified successfully' };
@@ -416,7 +501,9 @@ export class AuthService {
   /**
    * Send password reset email
    */
-  async forgotPassword(forgotPasswordDto: ForgotPasswordDto): Promise<{ message: string }> {
+  async forgotPassword(
+    forgotPasswordDto: ForgotPasswordDto,
+  ): Promise<{ message: string }> {
     const { email } = forgotPasswordDto;
 
     const user = await this.userModel.findOne({ email });
@@ -434,14 +521,16 @@ export class AuthService {
     await user.save();
 
     // TODO: Send reset email
-    this.logger.log(`Password reset email should be sent to ${email} with token: ${resetToken}`);
+    this.logger.log(
+      `Password reset email should be sent to ${email} with token: ${resetToken}`,
+    );
 
     await this.auditService.logAuthEvent(
       (user._id as string).toString(),
       'password_reset_requested',
       'unknown',
       'unknown',
-      true
+      true,
     );
 
     return { message: 'If the email exists, a reset link has been sent' };
@@ -450,7 +539,9 @@ export class AuthService {
   /**
    * Reset password using token
    */
-  async resetPassword(resetPasswordDto: ResetPasswordDto): Promise<{ message: string }> {
+  async resetPassword(
+    resetPasswordDto: ResetPasswordDto,
+  ): Promise<{ message: string }> {
     const { token, newPassword } = resetPasswordDto;
 
     const user = await this.userModel.findOne({
@@ -475,25 +566,30 @@ export class AuthService {
 
     // Terminate all active sessions after password reset for security
     await this.logout((user._id as string).toString(), undefined, true);
-    this.logger.log(`All sessions terminated for user ${user.email} after password reset`);
+    this.logger.log(
+      `All sessions terminated for user ${user.email} after password reset`,
+    );
 
     await this.auditService.logAuthEvent(
       (user._id as string).toString(),
       'password_reset',
       'unknown',
       'unknown',
-      true
+      true,
     );
 
-    return { message: 'Password reset successfully. Please log in again with your new password.' };
+    return {
+      message:
+        'Password reset successfully. Please log in again with your new password.',
+    };
   }
 
   /**
    * Change password for authenticated user
    */
   async changePassword(
-    userId: string, 
-    changePasswordDto: ChangePasswordDto
+    userId: string,
+    changePasswordDto: ChangePasswordDto,
   ): Promise<{ message: string }> {
     const { currentPassword, newPassword } = changePasswordDto;
 
@@ -503,7 +599,10 @@ export class AuthService {
     }
 
     // Verify current password
-    const isCurrentPasswordValid = await bcrypt.compare(currentPassword, user.password);
+    const isCurrentPasswordValid = await bcrypt.compare(
+      currentPassword,
+      user.password,
+    );
     if (!isCurrentPasswordValid) {
       throw new BadRequestException('Current password is incorrect');
     }
@@ -519,17 +618,22 @@ export class AuthService {
 
     // Terminate all active sessions after password change for security
     await this.logout(userId, undefined, true);
-    this.logger.log(`All sessions terminated for user ${user.email} after password change`);
+    this.logger.log(
+      `All sessions terminated for user ${user.email} after password change`,
+    );
 
     await this.auditService.logAuthEvent(
       userId,
       'password_change',
       'unknown',
       'unknown',
-      true
+      true,
     );
 
-    return { message: 'Password changed successfully. Please log in again with your new password.' };
+    return {
+      message:
+        'Password changed successfully. Please log in again with your new password.',
+    };
   }
 
   /**
@@ -539,7 +643,7 @@ export class AuthService {
     user: UserDocument,
     ipAddress: string,
     userAgent: string,
-    deviceFingerprint?: string
+    deviceFingerprint?: string,
   ): Promise<AuthResponseDto> {
     try {
       const sessionId = this.encryptionService.generateSecureToken();
@@ -558,15 +662,21 @@ export class AuthService {
         sub: (user._id as string).toString(),
         sessionId,
         deviceFingerprint,
-        tokenVersion: await this.getTokenVersion((user._id as string).toString()),
+        tokenVersion: await this.getTokenVersion(
+          (user._id as string).toString(),
+        ),
         type: 'refresh',
       };
 
       // Generate tokens
-      this.logger.debug('Generating JWT tokens with payload:', { ...payload, exp: undefined, iat: undefined });
+      this.logger.debug('Generating JWT tokens with payload:', {
+        ...payload,
+        exp: undefined,
+        iat: undefined,
+      });
       const accessToken = this.jwtService.sign(payload);
       this.logger.debug('Access token generated successfully');
-      
+
       const refreshToken = this.jwtService.sign(refreshPayload);
       this.logger.debug('Refresh token generated successfully');
 
@@ -580,7 +690,7 @@ export class AuthService {
           deviceFingerprint,
           createdAt: new Date(),
         },
-        7 * 24 * 60 * 60 // 7 days
+        7 * 24 * 60 * 60, // 7 days
       );
 
       return {
@@ -601,7 +711,9 @@ export class AuthService {
       };
     } catch (error) {
       this.logger.error('Failed to generate auth response:', error);
-      throw new BadRequestException('Failed to generate authentication response');
+      throw new BadRequestException(
+        'Failed to generate authentication response',
+      );
     }
   }
 
@@ -612,22 +724,27 @@ export class AuthService {
     // Search through all user verification cache entries
     // This is a simplified implementation - in production, you'd want a more efficient lookup
     const users = await this.userModel.find({ isEmailVerified: false });
-    
+
     for (const user of users) {
-      const verificationData = await this.cacheService.get(`email_verification:${user._id}`);
+      const verificationData = await this.cacheService.get(
+        `email_verification:${user._id}`,
+      );
       if (verificationData && verificationData.token === token) {
         return {
           userId: user._id,
           email: verificationData.email,
-          token: verificationData.token
+          token: verificationData.token,
         };
       }
     }
-    
+
     return null;
   }
 
-  private async checkPasswordReuse(user: UserDocument, newPassword: string): Promise<boolean> {
+  private async checkPasswordReuse(
+    user: UserDocument,
+    newPassword: string,
+  ): Promise<boolean> {
     if (!user.passwordHistory) return false;
 
     for (const oldPasswordHash of user.passwordHistory) {
@@ -673,12 +790,13 @@ export class AuthService {
       }
 
       const sessions: SessionData[] = [];
-      const keyPrefix = this.configService.get<string>('database.redis.keyPrefix') || '';
+      const keyPrefix =
+        this.configService.get<string>('database.redis.keyPrefix') || '';
       const pattern = `${keyPrefix}session:*`;
-      
+
       // Get all session keys - we need to access the Redis client directly
       const keys = await this.cacheService['client'].keys(pattern);
-      
+
       for (const key of keys) {
         // Remove the prefix and get the actual key to use with cacheService
         const sessionKey = key.replace(keyPrefix, '');
@@ -691,13 +809,18 @@ export class AuthService {
             userAgent: sessionData.userAgent,
             deviceFingerprint: sessionData.deviceFingerprint,
             createdAt: new Date(sessionData.createdAt),
-            lastActivity: sessionData.lastActivity ? new Date(sessionData.lastActivity) : new Date(sessionData.createdAt),
+            lastActivity: sessionData.lastActivity
+              ? new Date(sessionData.lastActivity)
+              : new Date(sessionData.createdAt),
             deviceName: this.extractDeviceName(sessionData.userAgent),
           });
         }
       }
-      
-      return sessions.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+
+      return sessions.sort(
+        (a, b) =>
+          new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime(),
+      );
     } catch (error) {
       this.logger.error('Failed to get active sessions:', error);
       return [];
@@ -709,34 +832,45 @@ export class AuthService {
    */
   async terminateSession(userId: string, sessionId: string): Promise<void> {
     try {
-      this.logger.debug(`Attempting to terminate session ${sessionId} for user ${userId}`);
-      
+      this.logger.debug(
+        `Attempting to terminate session ${sessionId} for user ${userId}`,
+      );
+
       // First, verify the session exists and belongs to the user
       // Check all sessions for this user to find the matching one
-      const keyPrefix = this.configService.get<string>('database.redis.keyPrefix') || '';
+      const keyPrefix =
+        this.configService.get<string>('database.redis.keyPrefix') || '';
       const pattern = `${keyPrefix}session:*`;
-      
-      this.logger.debug(`Using key prefix: '${keyPrefix}' and pattern: '${pattern}'`);
-      
+
+      this.logger.debug(
+        `Using key prefix: '${keyPrefix}' and pattern: '${pattern}'`,
+      );
+
       // Get all session keys - we need to access the Redis client directly
       const keys = await this.cacheService['client'].keys(pattern);
-      this.logger.debug(`Found ${keys.length} session keys: ${JSON.stringify(keys)}`);
-      
+      this.logger.debug(
+        `Found ${keys.length} session keys: ${JSON.stringify(keys)}`,
+      );
+
       let sessionFound = false;
       let sessionData: any = null;
-      
+
       for (const key of keys) {
         // Remove the prefix and get the actual key to use with cacheService
         const sessionKey = key.replace(keyPrefix, '');
         const currentSessionId = sessionKey.replace('session:', '');
-        
-        this.logger.debug(`Checking key: '${key}' -> sessionKey: '${sessionKey}' -> currentSessionId: '${currentSessionId}'`);
-        
+
+        this.logger.debug(
+          `Checking key: '${key}' -> sessionKey: '${sessionKey}' -> currentSessionId: '${currentSessionId}'`,
+        );
+
         if (currentSessionId === sessionId) {
-          this.logger.debug(`Found matching session ID, getting session data...`);
+          this.logger.debug(
+            `Found matching session ID, getting session data...`,
+          );
           sessionData = await this.cacheService.get(sessionKey);
           this.logger.debug(`Session data: ${JSON.stringify(sessionData)}`);
-          
+
           if (sessionData && sessionData.userId === userId) {
             this.logger.debug(`Session belongs to user, deleting...`);
             sessionFound = true;
@@ -745,16 +879,22 @@ export class AuthService {
             this.logger.debug(`Session deleted successfully`);
             break;
           } else {
-            this.logger.debug(`Session does not belong to user. Expected: ${userId}, Found: ${sessionData?.userId}`);
+            this.logger.debug(
+              `Session does not belong to user. Expected: ${userId}, Found: ${sessionData?.userId}`,
+            );
           }
         }
       }
-      
+
       if (!sessionFound) {
-        this.logger.error(`Session ${sessionId} not found or does not belong to user ${userId}`);
-        throw new UnauthorizedException('Session not found or does not belong to user');
+        this.logger.error(
+          `Session ${sessionId} not found or does not belong to user ${userId}`,
+        );
+        throw new UnauthorizedException(
+          'Session not found or does not belong to user',
+        );
       }
-      
+
       // Log the session termination
       await this.auditService.logAuthEvent(
         userId,
@@ -762,9 +902,9 @@ export class AuthService {
         sessionData.ipAddress || 'unknown',
         sessionData.userAgent || 'unknown',
         true,
-        'Session terminated by user'
+        'Session terminated by user',
       );
-      
+
       this.logger.log(`Session ${sessionId} terminated for user ${userId}`);
     } catch (error) {
       this.logger.error('Failed to terminate session:', error);

@@ -28,8 +28,10 @@ export class CacheService {
         return false;
       },
       // Enable TLS for secure connections in production
-      tls: this.configService.get<string>('app.env') === 'production'
-        ? { rejectUnauthorized: false } : undefined,
+      tls:
+        this.configService.get<string>('app.env') === 'production'
+          ? { rejectUnauthorized: false }
+          : undefined,
     };
 
     this.client = new Redis(redisOptions);
@@ -39,7 +41,8 @@ export class CacheService {
   }
 
   async set(key: string, value: any, ttl?: number): Promise<void> {
-    const expiry = ttl || this.configService.get<number>('database.redis.ttl') || 3600;
+    const expiry =
+      ttl || this.configService.get<number>('database.redis.ttl') || 3600;
     this.logger.debug(`Setting cache key: ${key} with TTL: ${expiry}`);
     await this.client.setex(key, expiry, JSON.stringify(value));
     this.logger.debug(`Successfully set cache key: ${key}`);
@@ -48,7 +51,9 @@ export class CacheService {
   async get(key: string): Promise<any> {
     this.logger.debug(`Getting cache key: ${key}`);
     const value = await this.client.get(key);
-    this.logger.debug(`Cache key ${key} result: ${value ? 'found' : 'not found'}`);
+    this.logger.debug(
+      `Cache key ${key} result: ${value ? 'found' : 'not found'}`,
+    );
     return value ? JSON.parse(value) : null;
   }
 
@@ -66,4 +71,3 @@ export class CacheService {
     await this.client.del(key);
   }
 }
-

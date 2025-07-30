@@ -14,7 +14,12 @@ export interface AuditEventData {
   userAgent?: string;
   timestamp?: Date;
   severity: 'low' | 'medium' | 'high' | 'critical';
-  category: 'authentication' | 'data_access' | 'administration' | 'security' | 'system';
+  category:
+    | 'authentication'
+    | 'data_access'
+    | 'administration'
+    | 'security'
+    | 'system';
   success: boolean;
   errorMessage?: string;
   additionalData?: Record<string, any>;
@@ -48,9 +53,22 @@ export class AuditService {
    */
   async logAuthEvent(
     userId: string,
-    action: 'login' | 'logout' | 'failed_login' | 'password_change' | 'mfa_enabled' | 'mfa_disabled' | 
-           'register' | 'login_partial' | 'email_verified' | 'password_reset_requested' | 'password_reset' |
-           'mfa_setup_init' | 'mfa_setup_failed' | 'mfa_failed' | 'mfa_success',
+    action:
+      | 'login'
+      | 'logout'
+      | 'failed_login'
+      | 'password_change'
+      | 'mfa_enabled'
+      | 'mfa_disabled'
+      | 'register'
+      | 'login_partial'
+      | 'email_verified'
+      | 'password_reset_requested'
+      | 'password_reset'
+      | 'mfa_setup_init'
+      | 'mfa_setup_failed'
+      | 'mfa_failed'
+      | 'mfa_success',
     ipAddress: string,
     userAgent: string,
     success: boolean = true,
@@ -89,7 +107,7 @@ export class AuditService {
     metadata?: Record<string, any>,
   ): Promise<void> {
     const severity = this.determineSeverity(resourceType, action);
-    
+
     const auditData: AuditEventData = {
       userId,
       resourceType,
@@ -115,7 +133,11 @@ export class AuditService {
    * Logs security events
    */
   async logSecurityEvent(
-    eventType: 'suspicious_activity' | 'security_violation' | 'unauthorized_access' | 'data_breach',
+    eventType:
+      | 'suspicious_activity'
+      | 'security_violation'
+      | 'unauthorized_access'
+      | 'data_breach',
     details: Record<string, any>,
     userId?: string,
     ipAddress?: string,
@@ -183,8 +205,10 @@ export class AuditService {
       };
 
       await this.auditLogModel.create(auditLog);
-      
-      this.logger.log(`Audit log created: ${auditData.action} by ${auditData.userId || 'system'}`);
+
+      this.logger.log(
+        `Audit log created: ${auditData.action} by ${auditData.userId || 'system'}`,
+      );
     } catch (error) {
       this.logger.error('Failed to create audit log:', error);
       // Don't throw error to avoid disrupting main application flow
@@ -206,11 +230,22 @@ export class AuditService {
   /**
    * Determines severity based on resource type and action
    */
-  private determineSeverity(resourceType: string, action: string): 'low' | 'medium' | 'high' | 'critical' {
-    const sensitiveResources = ['patient_data', 'medical_records', 'prescriptions', 'payment_info'];
+  private determineSeverity(
+    resourceType: string,
+    action: string,
+  ): 'low' | 'medium' | 'high' | 'critical' {
+    const sensitiveResources = [
+      'patient_data',
+      'medical_records',
+      'prescriptions',
+      'payment_info',
+    ];
     const criticalActions = ['delete', 'export'];
 
-    if (sensitiveResources.includes(resourceType) && criticalActions.includes(action)) {
+    if (
+      sensitiveResources.includes(resourceType) &&
+      criticalActions.includes(action)
+    ) {
       return 'critical';
     }
     if (sensitiveResources.includes(resourceType)) {
@@ -227,13 +262,22 @@ export class AuditService {
    */
   private sanitizeData(data: any): any {
     if (!data) return data;
-    
-    const sensitiveFields = ['password', 'token', 'secret', 'key', 'ssn', 'creditCard'];
+
+    const sensitiveFields = [
+      'password',
+      'token',
+      'secret',
+      'key',
+      'ssn',
+      'creditCard',
+    ];
     const sanitized = JSON.parse(JSON.stringify(data));
-    
+
     function sanitizeObject(obj: any): any {
       for (const key in obj) {
-        if (sensitiveFields.some(field => key.toLowerCase().includes(field))) {
+        if (
+          sensitiveFields.some((field) => key.toLowerCase().includes(field))
+        ) {
           obj[key] = '[REDACTED]';
         } else if (typeof obj[key] === 'object' && obj[key] !== null) {
           sanitizeObject(obj[key]);
@@ -241,7 +285,7 @@ export class AuditService {
       }
       return obj;
     }
-    
+
     return sanitizeObject(sanitized);
   }
 
@@ -267,7 +311,12 @@ export class AuditService {
    * Checks if audit event is relevant for NDHM compliance
    */
   private isNDHMRelevant(auditData: AuditEventData): boolean {
-    const ndhmRelevantResources = ['patient_data', 'health_records', 'consultations', 'prescriptions'];
+    const ndhmRelevantResources = [
+      'patient_data',
+      'health_records',
+      'consultations',
+      'prescriptions',
+    ];
     return ndhmRelevantResources.includes(auditData.resourceType);
   }
 
@@ -275,10 +324,18 @@ export class AuditService {
    * Checks if audit event is relevant for GDPR compliance
    */
   private isGDPRRelevant(auditData: AuditEventData): boolean {
-    const gdprRelevantActions = ['create', 'read', 'update', 'delete', 'export'];
+    const gdprRelevantActions = [
+      'create',
+      'read',
+      'update',
+      'delete',
+      'export',
+    ];
     const gdprRelevantResources = ['user_data', 'personal_information'];
-    return gdprRelevantActions.includes(auditData.action) || 
-           gdprRelevantResources.includes(auditData.resourceType);
+    return (
+      gdprRelevantActions.includes(auditData.action) ||
+      gdprRelevantResources.includes(auditData.resourceType)
+    );
   }
 
   /**
@@ -292,9 +349,12 @@ export class AuditService {
   /**
    * Checks for suspicious failed login patterns
    */
-  private async checkFailedLoginAttempts(userId: string, ipAddress: string): Promise<void> {
+  private async checkFailedLoginAttempts(
+    userId: string,
+    ipAddress: string,
+  ): Promise<void> {
     const last15Minutes = new Date(Date.now() - 15 * 60 * 1000);
-    
+
     const recentFailures = await this.auditLogModel.countDocuments({
       $or: [{ userId }, { ipAddress }],
       action: 'failed_login',
@@ -327,8 +387,10 @@ export class AuditService {
 
     try {
       // Implementation would integrate with alerting service (email, Slack, PagerDuty, etc.)
-      this.logger.warn(`SECURITY ALERT: ${auditData.action} - ${JSON.stringify(auditData)}`);
-      
+      this.logger.warn(
+        `SECURITY ALERT: ${auditData.action} - ${JSON.stringify(auditData)}`,
+      );
+
       // TODO: Implement actual alerting mechanism
       // await this.notificationService.sendSecurityAlert(auditData);
     } catch (error) {
@@ -341,13 +403,13 @@ export class AuditService {
    */
   async archiveOldLogs(): Promise<void> {
     const now = new Date();
-    
+
     try {
       const result = await this.auditLogModel.updateMany(
         { retentionDate: { $lt: now }, isArchived: false },
         { isArchived: true },
       );
-      
+
       this.logger.log(`Archived ${result.modifiedCount} audit logs`);
     } catch (error) {
       this.logger.error('Failed to archive audit logs:', error);
@@ -380,25 +442,25 @@ export class AuditService {
     category?: string,
     action?: string,
     startDate?: Date,
-    endDate?: Date
+    endDate?: Date,
   ): Promise<{ logs: AuditLog[]; total: number }> {
     try {
       const query: any = { userId };
-      
+
       if (category) {
         query.category = category;
       }
-      
+
       if (action) {
         query.action = action;
       }
-      
+
       if (startDate || endDate) {
         query.timestamp = {};
         if (startDate) query.timestamp.$gte = startDate;
         if (endDate) query.timestamp.$lte = endDate;
       }
-      
+
       const [logs, total] = await Promise.all([
         this.auditLogModel
           .find(query)
@@ -408,9 +470,9 @@ export class AuditService {
           .select('-oldValue -newValue -additionalData') // Exclude sensitive data
           .lean()
           .exec(),
-        this.auditLogModel.countDocuments(query).exec()
+        this.auditLogModel.countDocuments(query).exec(),
       ]);
-      
+
       return { logs, total };
     } catch (error) {
       this.logger.error('Failed to retrieve audit logs:', error);
@@ -421,7 +483,10 @@ export class AuditService {
   /**
    * Retrieves recent audit logs for a user
    */
-  async getRecentUserAuditLogs(userId: string, limit: number = 20): Promise<AuditLog[]> {
+  async getRecentUserAuditLogs(
+    userId: string,
+    limit: number = 20,
+  ): Promise<AuditLog[]> {
     try {
       return await this.auditLogModel
         .find({ userId })
