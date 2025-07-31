@@ -1,21 +1,64 @@
-import { 
-  IsNotEmpty, 
-  IsOptional, 
-  IsEnum, 
-  IsNumber, 
-  IsArray, 
-  IsString, 
-  IsObject, 
+import { ApiProperty, PartialType, ApiPropertyOptional } from '@nestjs/swagger';
+import {
+  IsString,
+  IsMongoId,
+  IsOptional,
+  IsEnum,
+  ValidateNested,
+  IsIn,
+  IsNumber,
+  Min,
+  IsNotEmpty,
+  IsArray,
+  IsObject,
   IsBoolean,
   IsDateString,
-  ValidateNested,
-  Min,
   Max
 } from 'class-validator';
 import { Type } from 'class-transformer';
-import { ApiProperty, ApiPropertyOptional } from '@nestjs/swagger';
-import { ConsultationType, ConsultationStatus } from '../schemas/consultation.schema';
+import {
+  ConsultationStatus,
+  ConsultationType,
+} from '../schemas/consultation.schema';
 import { Encrypt } from '../../../shared/decorators/encrypt.decorator';
+
+export class GetDoctorConsultationsDto {
+  @ApiProperty({
+    required: false,
+    description: 'Filter by consultation status',
+    enum: Object.values(ConsultationStatus),
+  })
+  @IsOptional()
+  @IsString()
+  @IsIn(Object.values(ConsultationStatus))
+  status?: ConsultationStatus;
+
+  @ApiProperty({ required: false, description: 'Page number for pagination', default: 1 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  page?: number = 1;
+
+  @ApiProperty({ required: false, description: 'Number of items per page', default: 10 })
+  @IsOptional()
+  @Type(() => Number)
+  @IsNumber()
+  @Min(1)
+  limit?: number = 10;
+
+  @ApiProperty({ required: false, description: 'Sort by field', default: 'createdAt' })
+  @IsOptional()
+  @IsString()
+  sortBy?: string = 'createdAt';
+
+  @ApiProperty({ required: false, description: 'Sort order', enum: ['asc', 'desc'], default: 'desc' })
+  @IsOptional()
+  @IsString()
+  @IsIn(['asc', 'desc'])
+  sortOrder?: 'asc' | 'desc' = 'desc';
+}
+
 
 // Patient Profile DTOs
 export class DemographicDataDto {

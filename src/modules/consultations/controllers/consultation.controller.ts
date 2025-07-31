@@ -32,7 +32,8 @@ import { ConsultationService } from '../services/consultation.service';
 import { 
   CreateConsultationDto, 
   UpdateConsultationStatusDto,
-  AdminUpdateConsultationStatusDto
+  AdminUpdateConsultationStatusDto,
+  GetDoctorConsultationsDto
 } from '../dto/new-consultation.dto';
 import { 
   AIAgentSymptomCollectionDto, 
@@ -145,6 +146,27 @@ export class ConsultationController {
   })
   async getConsultation(@Param('id') id: string, @GetUser() user: any) {
     return await this.consultationService.findConsultationById(id, user.id);
+  }
+
+  @Get('doctor/me')
+  @ApiOperation({ 
+    summary: 'Get consultations for the logged-in doctor',
+    description: 'Retrieves all consultations assigned to the currently logged-in doctor, with optional filtering and pagination.'
+  })
+  @ApiQuery({ type: GetDoctorConsultationsDto })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Consultations retrieved successfully' 
+  })
+  @Roles(UserRole.HEALTHCARE_PROVIDER)
+  async getDoctorConsultations(
+    @GetUser() user: any,
+    @Query() queryDto: GetDoctorConsultationsDto,
+  ) {
+    return await this.consultationService.findConsultationsByDoctorId(
+      user.id,
+      queryDto
+    );
   }
 
   @Get('patient/:patientId')
@@ -363,8 +385,9 @@ export class ConsultationController {
       const paymentService = this.consultationService['paymentService'];
       const cachedPayment = await paymentService.getPaymentBySessionId(debugData.sessionId);
       
-      // Check if session data exists
-      const sessionData = await this.consultationService['getTemporaryConsultationData'](debugData.sessionId);
+      // Check if session data exists using SessionManager
+      const sessionManager = this.consultationService['sessionManager'];
+      const sessionData = await sessionManager.getSession(debugData.sessionId);
       
       return {
         success: true,
@@ -374,7 +397,13 @@ export class ConsultationController {
           cachedPayment: cachedPayment ? 'EXISTS' : 'NOT_FOUND',
           sessionData: sessionData ? 'EXISTS' : 'NOT_FOUND',
           paymentDetails: cachedPayment,
-          sessionDetails: sessionData ? { hasData: true, keys: Object.keys(sessionData) } : null
+          sessionDetails: sessionData ? { 
+            hasData: true, 
+            patientId: sessionData.patientId,
+            currentPhase: sessionData.currentPhase,
+            dataKeys: Object.keys(sessionData.data || {}),
+            expiresAt: sessionData.expiresAt
+          } : null
         }
       };
     } catch (error) {

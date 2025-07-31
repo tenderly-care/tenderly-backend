@@ -56,6 +56,30 @@ export enum Priority {
   EMERGENCY = 5,
 }
 
+export enum PrescriptionStatus {
+  NOT_STARTED = 'not_started',                   // Default state
+  DIAGNOSIS_MODIFICATION = 'diagnosis_modification', // Doctor is editing the AI's diagnosis
+  PRESCRIPTION_DRAFT = 'prescription_draft',         // Doctor is actively drafting the prescription
+  AWAITING_REVIEW = 'awaiting_review',               // Draft PDF has been generated for doctor's review
+  AWAITING_SIGNATURE = 'awaiting_signature',         // Doctor has approved the draft and is ready to sign
+  SIGNED = 'signed',                                 // Prescription is digitally signed
+  SENT = 'sent',                                     // Prescription is sent/made available to the patient
+  CANCELLED = 'cancelled',                           // Prescription was cancelled
+  REVISION_REQUIRED = 'revision_required',           // Doctor marked the draft for further edits
+}
+
+export enum PrescriptionAction {
+  CREATED = 'created',
+  DIAGNOSIS_MODIFIED = 'diagnosis_modified',
+  DRAFT_UPDATED = 'draft_updated',
+  PREVIEW_GENERATED = 'preview_generated',
+  SIGNATURE_APPLIED = 'signature_applied',
+  SENT_TO_PATIENT = 'sent_to_patient',
+  CANCELLED = 'cancelled',
+  REVISION_REQUESTED = 'revision_requested',
+  CONSULTATION_COMPLETED = 'consultation_completed',
+}
+
 @Schema({ timestamps: true, collection: 'consultations' })
 export class Consultation {
   @Prop({ required: true, type: Types.ObjectId, ref: 'User', index: true })
@@ -138,14 +162,107 @@ export class Consultation {
 
   @Prop({ type: Object })
   @Encrypt()
-  aiAgentOutput: any; // StructuredDiagnosisResponseDto
+  aiAgentOutput: any; // StructuredDiagnosisResponseDto - Original AI output
 
-  // Prescription Management
-  @Prop({ type: String, enum: ['pending', 'sent'], default: 'pending' })
-  prescriptionStatus: 'pending' | 'sent';
+  // Doctor's enhanced/modified diagnosis based on AI output
+  @Prop({ type: Object })
+  @Encrypt()
+  doctorDiagnosis: {
+    // Enhanced diagnosis data (based on aiAgentOutput structure)
+    possible_diagnoses: string[];
+    clinical_reasoning: string;
+    recommended_investigations: Array<{
+      category: string;
+      tests: Array<{ name: string; priority: string; reason: string }>;
+    }>;
+    treatment_recommendations: {
+      primary_treatment: string;
+      safe_medications: string[];
+      lifestyle_modifications: string[];
+      dietary_advice: string[];
+      follow_up_timeline: string;
+    };
+    patient_education: string[];
+    warning_signs: string[];
+    confidence_score: number;
+    processing_notes: string;
+    disclaimer: string;
+    
+    // Doctor modification metadata
+    modifiedAt: Date;
+    modifiedBy: Types.ObjectId;
+    modificationType: 'enhanced' | 'partial' | 'major_revision';
+    modificationNotes?: string;
+    changesFromAI: string[]; // List of fields that were changed from AI output
+  };
 
-  @Prop({ type: String })
-  sentPrescriptionPdfUrl?: string;
+
+  @Prop({ type: String, enum: PrescriptionStatus, default: PrescriptionStatus.NOT_STARTED, index: true })
+  prescriptionStatus: PrescriptionStatus;
+
+  @Prop({ type: Object })
+  @Encrypt()
+  prescriptionData: {
+    // Doctor's final diagnosis, based on the AI's output
+    modifiedDiagnosis: {
+      primaryDiagnosis: string;
+      differentialDiagnosis: string[];
+      clinicalReasoning: string; // Doctor's notes on why they made changes
+      confidenceScore: number;
+      modifiedAt: Date;
+      modifiedBy: Types.ObjectId;
+    };
+
+    // Medications
+    medications: Array<{
+      name: string;
+      dosage: string;
+      frequency: string;
+      duration: string;
+      instructions: string;
+    }>;
+
+    // Investigations
+    investigations: Array<{
+      name: string;
+      instructions: string;
+    }>;
+
+    // Lifestyle advice
+    lifestyleAdvice: string[];
+
+    // Follow-up
+    followUp: {
+      date: Date;
+      instructions: string;
+    };
+
+    // Digital Signature details
+    digitalSignature: {
+      signature: string; // The cryptographic signature
+      algorithm: string; // e.g., 'RS256'
+      certificateId: string; // ID of the signing certificate or KMS key
+      signedAt: Date;
+      ipAddress: string;
+      userAgent: string;
+    };
+
+    // PDF Storage details
+    draftPdfUrl?: string; // URL to the temporary, watermarked PDF
+    signedPdfUrl?: string; // URL to the final, signed PDF
+    pdfHash?: string; // SHA-256 hash of the final PDF for integrity checks
+  };
+
+  // Prescription History for Audit
+  @Prop({ type: [Object], default: [] })
+  prescriptionHistory: Array<{
+    action: PrescriptionAction;
+    timestamp: Date;
+    performedBy: Types.ObjectId;
+    details: string;
+    ipAddress?: string;
+    userAgent?: string;
+  }>;
 
   // Communication History
   @Prop({ type: [Object], default: [] })
@@ -241,5 +358,7 @@ export const ConsultationSchema = SchemaFactory.createForClass(Consultation);
 ConsultationSchema.index({ patientId: 1, status: 1 });
 ConsultationSchema.index({ consultationId: 1 }, { unique: true });
 ConsultationSchema.index({ doctorId: 1, status: 1 });
+ConsultationSchema.index({ doctorId: 1, prescriptionStatus: 1 }); // For prescription workflow queries
+ConsultationSchema.index({ prescriptionStatus: 1 }); // For prescription status filtering
 ConsultationSchema.index({ createdAt: -1 });
 ConsultationSchema.index({ updatedAt: -1 });
