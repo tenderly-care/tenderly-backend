@@ -579,19 +579,38 @@ export class PrescriptionService {
           <p><strong>Possible Diagnoses:</strong> ${
             Array.isArray(consultation.doctorDiagnosis?.possible_diagnoses)
               ? consultation.doctorDiagnosis.possible_diagnoses
-                  .map((d: any) => d && typeof d === 'object' && 'name' in d ? d.name : '')
+                  .map((d: any) => {
+                    // Handle both string and object formats
+                    if (typeof d === 'string') {
+                      return d;
+                    } else if (d && typeof d === 'object' && 'name' in d) {
+                      return d.name;
+                    }
+                    return '';
+                  })
                   .filter(Boolean)
                   .join(', ') || 'Not specified'
               : 'Not specified'
           }</p>
-          <p><strong>Diagnosis Description:</strong> ${
-            Array.isArray(consultation.doctorDiagnosis?.possible_diagnoses)
-              ? consultation.doctorDiagnosis.possible_diagnoses
-                  .map((d: any) => d && typeof d === 'object' && 'description' in d ? d.description : '')
-                  .filter(Boolean)
-                  .join(', ') || 'Not specified'
-              : 'Not specified'
-          }</p>
+          ${
+            // Only show diagnosis description if we have object-based diagnoses with descriptions
+            Array.isArray(consultation.doctorDiagnosis?.possible_diagnoses) &&
+            consultation.doctorDiagnosis.possible_diagnoses.some((d: any) => 
+              d && typeof d === 'object' && 'description' in d && d.description
+            )
+              ? `<p><strong>Diagnosis Description:</strong> ${
+                  consultation.doctorDiagnosis.possible_diagnoses
+                    .map((d: any) => {
+                      if (d && typeof d === 'object' && 'description' in d) {
+                        return d.description;
+                      }
+                      return '';
+                    })
+                    .filter(Boolean)
+                    .join(', ')
+                }</p>`
+              : ''
+          }
           <p><strong>Clinical Reasoning:</strong> ${consultation.doctorDiagnosis?.clinical_reasoning || 'Not specified'}</p>
         </div>
 
