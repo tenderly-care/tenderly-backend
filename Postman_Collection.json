@@ -1,0 +1,146 @@
+{
+  "info": {
+    "_postman_id": "razorpay-integration-collection",
+    "name": "Tenderly Payment Integration",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
+  },
+  "item": [
+    {
+      "name": "Health Check",
+      "request": {
+        "method": "GET",
+        "header": [],
+        "url": {
+          "raw": "{{base_url}}/health",
+          "host": ["{{base_url}}"],
+          "path": ["health"]
+        }
+      }
+    },
+    {
+      "name": "Register User",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"Test123@\",\n  \"firstName\": \"Test\",\n  \"lastName\": \"User\",\n  \"phone\": \"+919876543210\",\n  \"role\": \"patient\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/auth/register",
+          "host": ["{{base_url}}"],
+          "path": ["auth","register"]
+        }
+      }
+    },
+    {
+      "name": "Login User",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"email\": \"test@example.com\",\n  \"password\": \"Test123@\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/auth/login",
+          "host": ["{{base_url}}"],
+          "path": ["auth","login"]
+        }
+      }
+    },
+    {
+      "name": "Create Payment Order",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Authorization", "value": "Bearer {{jwt_token}}"}
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sessionId\": \"test_session_123\",\n  \"patientId\": \"test_patient_123\",\n  \"consultationType\": \"video\",\n  \"diagnosis\": \"Test diagnosis\",\n  \"severity\": \"moderate\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/consultations/create-payment-order",
+          "host": ["{{base_url}}"],
+          "path": ["consultations","create-payment-order"]
+        }
+      }
+    },
+    {
+      "name": "Mock Complete Payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Authorization", "value": "Bearer {{jwt_token}}"}
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sessionId\": \"test_session_123\",\n  \"paymentId\": \"{{payment_id}}\",\n  \"success\": true\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/consultations/mock-complete-payment",
+          "host": ["{{base_url}}"],
+          "path": ["consultations","mock-complete-payment"]
+        }
+      }
+    },
+    {
+      "name": "Verify Payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Authorization", "value": "Bearer {{jwt_token}}"}
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sessionId\": \"test_session_123\",\n  \"paymentId\": \"{{payment_id}}\",\n  \"gatewayTransactionId\": \"mock_txn_123\",\n  \"paymentMethod\": \"mock\",\n  \"paymentMetadata\": {\n    \"signature\": \"mock_signature_123\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/consultations/verify-payment",
+          "host": ["{{base_url}}"],
+          "path": ["consultations","verify-payment"]
+        }
+      }
+    },
+    {
+      "name": "Confirm Payment",
+      "request": {
+        "method": "POST",
+        "header": [
+          {"key": "Content-Type", "value": "application/json"},
+          {"key": "Authorization", "value": "Bearer {{jwt_token}}"}
+        ],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sessionId\": \"test_session_123\",\n  \"paymentId\": \"{{payment_id}}\",\n  \"gatewayTransactionId\": \"mock_txn_123\",\n  \"paymentMethod\": \"mock\",\n  \"paymentMetadata\": {\n    \"signature\": \"mock_signature_123\"\n  }\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/consultations/confirm-payment",
+          "host": ["{{base_url}}"],
+          "path": ["consultations","confirm-payment"]
+        }
+      }
+    },
+    {
+      "name": "Debug Payment",
+      "request": {
+        "method": "POST",
+        "header": [{"key": "Content-Type", "value": "application/json"}],
+        "body": {
+          "mode": "raw",
+          "raw": "{\n  \"sessionId\": \"test_session_123\",\n  \"paymentId\": \"{{payment_id}}\"\n}"
+        },
+        "url": {
+          "raw": "{{base_url}}/consultations/debug-payment",
+          "host": ["{{base_url}}"],
+          "path": ["consultations","debug-payment"]
+        }
+      }
+    }
+  ]
+}
+

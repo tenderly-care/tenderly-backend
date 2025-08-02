@@ -4,6 +4,7 @@ import { ThrottlerModule } from '@nestjs/throttler';
 import { HttpModule } from '@nestjs/axios';
 import { ConsultationController } from './controllers/consultation.controller';
 import { DoctorShiftController } from './controllers/doctor-shift.controller';
+import { PrescriptionController } from './controllers/prescription.controller';
 import { ConsultationService } from './services/consultation.service';
 import { DoctorShiftService } from './services/doctor-shift.service';
 import { AIAgentService } from './services/ai-agent.service';
@@ -18,6 +19,11 @@ import { AuditLog, AuditLogSchema } from '../../security/audit/schemas/audit-log
 import { ConsultationBusinessService } from './services/consultation-business.service';
 import { DoctorAssignmentService } from './services/doctor-assignment.service';
 import { User, UserSchema } from '../users/schemas/user.schema';
+import { PdfGenerationService } from './services/pdf-generation.service';
+import { DigitalSignatureService } from './services/digital-signature.service';
+import { FileStorageService } from './services/file-storage.service';
+import { PrescriptionService } from './services/prescription.service';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
   imports: [
@@ -29,6 +35,7 @@ import { User, UserSchema } from '../users/schemas/user.schema';
     ]),
     CacheModule,
     HttpModule,
+    PaymentsModule,
     ThrottlerModule.forRoot([
       {
         name: 'consultation-requests',
@@ -37,7 +44,7 @@ import { User, UserSchema } from '../users/schemas/user.schema';
       },
     ]),
   ],
-  controllers: [ConsultationController, DoctorShiftController],
+  controllers: [ConsultationController, DoctorShiftController, PrescriptionController],
   providers: [
     ConsultationService,
     ConsultationBusinessService,
@@ -47,7 +54,11 @@ import { User, UserSchema } from '../users/schemas/user.schema';
     PaymentService,
     SessionManagerService,
     DoctorShiftService,
-    AuditService
+    AuditService,
+    PdfGenerationService,
+    DigitalSignatureService,
+    FileStorageService,
+    PrescriptionService
   ],
   exports: [
     ConsultationService,

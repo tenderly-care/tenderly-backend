@@ -135,6 +135,43 @@ export class ConsultationService {
     return result;
   }
 
+  async findConsultationsByDoctorId(
+    doctorId: string,
+    queryDto: any,
+  ): Promise<{ consultations: Consultation[]; total: number }> {
+    try {
+      this.logger.log(`Fetching consultations for doctor: ${doctorId}`);
+      
+      const { page = 1, limit = 10, status, sortBy = 'createdAt', sortOrder = 'desc' } = queryDto;
+      
+      const query: any = { doctorId: new Types.ObjectId(doctorId) };
+      
+      if (status) {
+        query.status = status;
+      }
+      
+      const sortOptions: { [key: string]: 'asc' | 'desc' } = {};
+      sortOptions[sortBy] = sortOrder;
+
+      const [consultations, total] = await Promise.all([
+        this.consultationModel
+          .find(query)
+          .sort(sortOptions)
+          .limit(limit)
+          .skip((page - 1) * limit)
+          .populate('patientId', 'firstName lastName email')
+          .exec(),
+        this.consultationModel.countDocuments(query),
+      ]);
+      
+      return { consultations, total };
+
+    } catch (error) {
+      this.logger.error(`Failed to fetch consultations for doctor ${doctorId}: ${error.message}`);
+      throw new InternalServerErrorException('Failed to fetch consultations');
+    }
+  }
+
   /**
    * Collect AI Agent symptoms and retrieve diagnosis with session management
    */
@@ -1033,6 +1070,7 @@ export class ConsultationService {
 
       // Validate input
       if (!paymentConfirmationDto.sessionId || !paymentConfirmationDto.paymentId) {
+        this.logger.error(`[${transactionId}] Invalid input: Session ID or Payment ID is missing`);
         throw new BadRequestException('Session ID and Payment ID are required');
       }
 
@@ -1051,6 +1089,7 @@ export class ConsultationService {
       }
 
       if (!paymentStatus || paymentStatus.status !== 'payment_completed') {
+        this.logger.error(`[${transactionId}] Payment not completed. Status: ${paymentStatus?.status}`);
         throw new BadRequestException('Payment verification failed or payment not completed');
       }
 
@@ -1074,6 +1113,7 @@ export class ConsultationService {
       this.logger.debug(`[${transactionId}] Session data validated successfully`);
 
       // Step 3: Create clinical session
+      this.logger.debug(`[${transactionId}] Creating clinical session`);
       let clinicalSessionId;
       try {
         clinicalSessionId = await this.sessionManager.createClinicalSession(
@@ -1090,6 +1130,7 @@ export class ConsultationService {
       this.logger.debug(`[${transactionId}] Clinical session created: ${clinicalSessionId}`);
 
       // Step 4: Check for consultation conflicts
+      this.logger.debug(`[${transactionId}] Checking for consultation conflicts`);
       let conflicts;
       try {
         conflicts = await this.consultationBusinessService.checkConsultationConflicts(patientId);
@@ -1106,9 +1147,9 @@ export class ConsultationService {
       }
 
       // Step 5: Assign doctor based on current shift
+      this.logger.debug(`[${transactionId}] Assigning doctor based on current shift`);
       let doctorAssignment;
       try {
-        this.logger.debug(`[${transactionId}] Assigning doctor based on current shift`);
         doctorAssignment = await this.doctorAssignmentService.assignDoctorToConsultation(
           sessionData.selectedConsultationType || 'chat',
           'normal'
@@ -1120,8 +1161,10 @@ export class ConsultationService {
       }
 
       // Step 6: Create or update Consultation document in DB
+      this.logger.debug(`[${transactionId}] Creating or updating consultation document`);
       let consultation;
       try {
+        // First, check if consultation already exists
         consultation = await this.consultationModel.findOne({
           patientId: new Types.ObjectId(patientId),
           consultationId: paymentConfirmationDto.sessionId
@@ -1140,7 +1183,19 @@ export class ConsultationService {
         };
 
         if (!consultation) {
-          consultation = new this.consultationModel({
+          this.logger.debug(`[${transactionId}] Creating new consultation document`);
+          
+          // Validate required fields before creating consultation
+          if (!doctorAssignment || !doctorAssignment.doctorId || !doctorAssignment.doctorInfo) {
+            throw new InternalServerErrorException('Doctor assignment data is incomplete');
+          }
+
+          if (!clinicalSessionId) {
+            throw new InternalServerErrorException('Clinical session ID is missing');
+          }
+
+          // Create consultation document with proper validation
+          const consultationData = {
             patientId: new Types.ObjectId(patientId),
             doctorId: new Types.ObjectId(doctorAssignment.doctorId),
             doctorInfo: doctorAssignment.doctorInfo,
@@ -1152,7 +1207,7 @@ export class ConsultationService {
             isActive: true,
             activatedAt: now,
             paymentInfo,
-            prescriptionStatus: 'pending',
+            prescriptionStatus: 'not_started',
             expiresAt: new Date(now.getTime() + 24 * 60 * 60 * 1000), // 24 hours from now
             businessRules: [
               'automatic_doctor_assignment_based_on_shift',
@@ -1177,10 +1232,23 @@ export class ConsultationService {
               referralSource: 'payment_confirmation',
               doctorAssignmentMethod: doctorAssignment.assignmentMetadata.fallbackUsed ? 'fallback' : 'shift_based'
             }
+          };
+
+          // Log the consultation data for debugging
+          this.logger.debug(`[${transactionId}] Consultation data to create:`, {
+            patientId: consultationData.patientId,
+            doctorId: consultationData.doctorId,
+            consultationId: consultationData.consultationId,
+            clinicalSessionId: consultationData.clinicalSessionId,
+            consultationType: consultationData.consultationType,
+            status: consultationData.status
           });
+
+          consultation = new this.consultationModel(consultationData);
           await consultation.save();
           this.logger.debug(`[${transactionId}] New consultation created in database with doctor assigned`);
         } else {
+          this.logger.debug(`[${transactionId}] Updating existing consultation document`);
           // Update existing consultation
           consultation.paymentInfo = paymentInfo;
           consultation.doctorId = new Types.ObjectId(doctorAssignment.doctorId);
@@ -1210,10 +1278,29 @@ export class ConsultationService {
         }
       } catch (dbError) {
         this.logger.error(`[${transactionId}] Failed to create/update consultation in database: ${dbError.message}`, dbError.stack);
+        
+        // Log additional context for debugging
+        this.logger.error(`[${transactionId}] Database operation failed with context:`, {
+          patientId,
+          sessionId: paymentConfirmationDto.sessionId,
+          paymentId: paymentStatus?.paymentId,
+          doctorAssignment: doctorAssignment ? {
+            doctorId: doctorAssignment.doctorId,
+            doctorInfo: doctorAssignment.doctorInfo ? {
+              firstName: doctorAssignment.doctorInfo.firstName,
+              lastName: doctorAssignment.doctorInfo.lastName
+            } : null
+          } : null,
+          clinicalSessionId,
+          error: dbError.message,
+          stack: dbError.stack
+        });
+        
         throw new InternalServerErrorException('Failed to create consultation record. Please try again.');
       }
 
-      // Step 6: Log audit event
+      // Step 7: Log audit event
+      this.logger.debug(`[${transactionId}] Logging audit event`);
       try {
         await this.auditService.logDataAccess(
           patientId,
@@ -1238,7 +1325,8 @@ export class ConsultationService {
         // Don't fail the payment confirmation if audit logging fails
       }
 
-      // Step 7: Clean up temporary data
+      // Step 8: Clean up temporary data
+      this.logger.debug(`[${transactionId}] Cleaning up temporary data`);
       try {
         await this.cleanupTemporaryData(paymentConfirmationDto.sessionId, transactionId);
         this.logger.debug(`[${transactionId}] Temporary data cleanup completed`);
@@ -1488,32 +1576,26 @@ export class ConsultationService {
     patientId: string,
     transactionId: string
   ): Promise<any> {
-    const sessionDataKey = `${sessionId}_selection`;
-    this.logger.debug(`[${transactionId}] Retrieving session data with key: ${sessionDataKey}`);
+    this.logger.debug(`[${transactionId}] Retrieving session data with key: ${sessionId}`);
     
     try {
-      // Try to retrieve session data
-      const sessionData = await this.getTemporaryConsultationData(sessionDataKey);
+      const session = await this.sessionManager.getSession(sessionId);
       
-      // Validate session data integrity
-      this.validateSessionData(sessionData, patientId, transactionId);
+      if (!session) {
+        this.logger.error(`[${transactionId}] Session is null or undefined`);
+        throw new BadRequestException('Session not found or expired');
+      }
       
-      return sessionData;
+      this.validateSessionData(session, patientId, transactionId);
+      
+      return session.data;
       
     } catch (sessionError) {
       this.logger.warn(`[${transactionId}] Session data retrieval failed: ${sessionError.message}`);
       
-      // Try to retrieve base session data (without _selection suffix)
-      try {
-        const baseSessionData = await this.getTemporaryConsultationData(sessionId);
-        
-        // If we found base session data, try to reconstruct
-        if (baseSessionData) {
-          this.logger.log(`[${transactionId}] Reconstructing session data from base session`);
-          return this.reconstructSessionData(baseSessionData, patientId, sessionId);
-        }
-      } catch (baseError) {
-        this.logger.warn(`[${transactionId}] Base session data also not found: ${baseError.message}`);
+      // If it's a BadRequestException, re-throw it
+      if (sessionError instanceof BadRequestException) {
+        throw sessionError;
       }
       
       // Last resort: create minimal recovery data
@@ -1525,19 +1607,21 @@ export class ConsultationService {
   /**
    * Validate session data integrity
    */
-  private validateSessionData(sessionData: any, patientId: string, transactionId: string): void {
-    if (!sessionData) {
+  private validateSessionData(session: any, patientId: string, transactionId: string): void {
+    if (!session) {
       throw new BadRequestException('Session data is null or undefined');
     }
+
+    const sessionData = session.data;
     
-    if (sessionData.patientId !== patientId) {
-      this.logger.error(`[${transactionId}] Patient ID mismatch: expected ${sessionData.patientId}, got ${patientId}`);
+    if (session.patientId !== patientId) {
+      this.logger.error(`[${transactionId}] Patient ID mismatch: expected ${session.patientId}, got ${patientId}`);
       throw new BadRequestException('Invalid session or patient mismatch');
     }
     
     // Log session data quality for monitoring
-    const hasSymptoms = sessionData.symptoms && Object.keys(sessionData.symptoms).length > 0;
-    const hasAIDiagnosis = sessionData.aiDiagnosis && Object.keys(sessionData.aiDiagnosis).length > 0;
+    const hasSymptoms = sessionData?.initialSymptoms && Object.keys(sessionData.initialSymptoms).length > 0;
+    const hasAIDiagnosis = sessionData?.aiDiagnosis && Object.keys(sessionData.aiDiagnosis).length > 0;
     
     this.logger.debug(`[${transactionId}] Session data quality: symptoms=${hasSymptoms}, aiDiagnosis=${hasAIDiagnosis}`);
   }
@@ -3304,6 +3388,80 @@ export class ConsultationService {
     }
   }
 
+  async createRazorpayPayment(
+    sessionId: string,
+    patientId: string,
+    requestMetadata?: { ipAddress: string; userAgent: string }
+  ): Promise<any> {
+    const transactionId = `razorpay_payment_${Date.now()}`;
+    
+    try {
+      this.logger.log(`[${transactionId}] Creating Razorpay payment for session: ${sessionId}, patient: ${patientId}`);
 
+      // Get session data to determine consultation type and pricing
+      const sessionData = await this.sessionManager.getSession(sessionId);
+      if (!sessionData) {
+        throw new BadRequestException('Session not found');
+      }
+
+      const consultationType = sessionData.data?.selectedConsultationType || 'chat';
+      const pricing = sessionData.data?.consultationPricing || this.getConsultationPricing(consultationType);
+
+      // Create Razorpay payment using payment service with provider
+      const customerDetails = {
+        name: 'Test Patient',
+        email: 'patient@example.com',
+        phone: '9999999999'
+      };
+      
+      const paymentResponse = await this.paymentService.createPaymentOrderWithProvider(
+        sessionId,
+        patientId,
+        consultationType as 'chat' | 'tele' | 'video' | 'emergency',
+        'Tenderly Healthcare Consultation',
+        'medium',
+        customerDetails,
+        requestMetadata
+      );
+
+      // Log audit event
+      await this.auditService.logDataAccess(
+        patientId,
+        'payment',
+        'create',
+        sessionId,
+        undefined,
+        {
+          sessionId,
+          consultationType,
+          paymentId: paymentResponse.paymentId,
+          amount: paymentResponse.amount,
+          currency: paymentResponse.currency,
+          razorpayPayment: true
+        },
+        requestMetadata
+      );
+
+      this.logger.log(`[${transactionId}] Razorpay payment created successfully: ${paymentResponse.paymentId}`);
+
+      return {
+        message: 'Razorpay payment order created successfully',
+        paymentId: paymentResponse.paymentId,
+        status: paymentResponse.status,
+        amount: paymentResponse.amount,
+        currency: paymentResponse.currency,
+        expiresAt: paymentResponse.expiresAt,
+        razorpayKey: this.configService.get('payment.razorpay.keyId'), // Add Razorpay key for frontend
+        nextStep: {
+          endpoint: '/consultations/confirm-payment',
+          description: 'Complete payment via Razorpay checkout'
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`[${transactionId}] Failed to create Razorpay payment: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
 
 }

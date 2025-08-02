@@ -3,14 +3,16 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import { SwaggerModule, DocumentBuilder } from '@nestjs/swagger';
 import { ConfigService } from '@nestjs/config';
+import { NestExpressApplication } from '@nestjs/platform-express';
 import helmet from 'helmet';
 import * as compression from 'compression';
+import { join } from 'path';
 
 import { AppModule } from './app.module';
 import { DoctorShiftService } from './modules/consultations/services/doctor-shift.service';
 
 async function bootstrap() {
-  const app = await NestFactory.create(AppModule, {
+  const app = await NestFactory.create<NestExpressApplication>(AppModule, {
     logger: ['error', 'warn', 'log', 'debug', 'verbose'],
   });
 
@@ -25,8 +27,11 @@ async function bootstrap() {
         directives: {
           defaultSrc: ["'self'"],
           styleSrc: ["'self'", "'unsafe-inline'"],
-          scriptSrc: ["'self'"],
+          scriptSrc: ["'self'", "'unsafe-inline'", 'https://checkout.razorpay.com'],
+          scriptSrcAttr: ["'unsafe-inline'"], // Allow inline event handlers for test pages
           imgSrc: ["'self'", 'data:', 'https:'],
+          connectSrc: ["'self'", 'https://api.razorpay.com', 'https://checkout.razorpay.com', 'https://lumberjack.razorpay.com'],
+          frameSrc: ["'self'", 'https://api.razorpay.com'],
         },
       },
     }),
@@ -34,6 +39,11 @@ async function bootstrap() {
 
   // Compression middleware
   app.use(compression());
+
+  // Static file serving for test pages
+  app.useStaticAssets(join(__dirname, '..', 'public'), {
+    prefix: '/test/',
+  });
 
   // CORS configuration
   app.enableCors({
@@ -116,6 +126,9 @@ async function bootstrap() {
     `🚀 Tenderly Backend running on: http://localhost:${port}/${apiPrefix}`,
   );
   console.log(`🌍 Environment: ${configService.get<string>('app.env')}`);
+  console.log(
+    `🧪 Razorpay Test Page: http://localhost:${port}/test/razorpay-test.html`,
+  );
 }
 
 bootstrap().catch((error) => {

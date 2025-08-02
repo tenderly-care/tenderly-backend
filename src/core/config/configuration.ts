@@ -108,6 +108,36 @@ export default () => ({
   },
 
   // External Integrations
+  // Payment Gateway Configuration
+  payment: {
+    provider: process.env.PAYMENT_PROVIDER || 'mock',
+    frontendUrl: process.env.FRONTEND_URL || 'http://localhost:3000',
+    
+    razorpay: {
+      environment: process.env.RAZORPAY_ENVIRONMENT || 'sandbox',
+      keyId: process.env.RAZORPAY_ENVIRONMENT === 'live' 
+        ? process.env.RAZORPAY_LIVE_KEY_ID
+        : process.env.RAZORPAY_SANDBOX_KEY_ID,
+      keySecret: process.env.RAZORPAY_ENVIRONMENT === 'live'
+        ? process.env.RAZORPAY_LIVE_KEY_SECRET
+        : process.env.RAZORPAY_SANDBOX_KEY_SECRET,
+      webhookSecret: process.env.RAZORPAY_ENVIRONMENT === 'live'
+        ? process.env.RAZORPAY_LIVE_WEBHOOK_SECRET
+        : process.env.RAZORPAY_SANDBOX_WEBHOOK_SECRET,
+      currency: 'INR',
+    },
+    
+    features: {
+      enableWebhooks: process.env.ENABLE_PAYMENT_WEBHOOKS === 'true',
+      enableRefunds: process.env.ENABLE_PAYMENT_REFUNDS === 'true',
+    },
+    
+    limits: {
+      maxRetries: parseInt(process.env.PAYMENT_MAX_RETRIES || '3'),
+      timeoutMs: parseInt(process.env.PAYMENT_TIMEOUT_MS || '30000'),
+    },
+  },
+
   integrations: {
     whatsapp: {
       accessToken: process.env.WHATSAPP_ACCESS_TOKEN,
@@ -121,12 +151,6 @@ export default () => ({
       clientSecret: process.env.GOOGLE_MEET_CLIENT_SECRET,
       redirectUri: process.env.GOOGLE_MEET_REDIRECT_URI,
       scopes: ['https://www.googleapis.com/auth/calendar'],
-    },
-    razorpay: {
-      keyId: process.env.RAZORPAY_KEY_ID,
-      keySecret: process.env.RAZORPAY_KEY_SECRET,
-      webhookSecret: process.env.RAZORPAY_WEBHOOK_SECRET,
-      currency: 'INR',
     },
     twilio: {
       accountSid: process.env.TWILIO_ACCOUNT_SID,
