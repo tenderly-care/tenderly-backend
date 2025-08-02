@@ -3388,6 +3388,80 @@ export class ConsultationService {
     }
   }
 
+  async createRazorpayPayment(
+    sessionId: string,
+    patientId: string,
+    requestMetadata?: { ipAddress: string; userAgent: string }
+  ): Promise<any> {
+    const transactionId = `razorpay_payment_${Date.now()}`;
+    
+    try {
+      this.logger.log(`[${transactionId}] Creating Razorpay payment for session: ${sessionId}, patient: ${patientId}`);
 
+      // Get session data to determine consultation type and pricing
+      const sessionData = await this.sessionManager.getSession(sessionId);
+      if (!sessionData) {
+        throw new BadRequestException('Session not found');
+      }
+
+      const consultationType = sessionData.data?.selectedConsultationType || 'chat';
+      const pricing = sessionData.data?.consultationPricing || this.getConsultationPricing(consultationType);
+
+      // Create Razorpay payment using payment service with provider
+      const customerDetails = {
+        name: 'Test Patient',
+        email: 'patient@example.com',
+        phone: '9999999999'
+      };
+      
+      const paymentResponse = await this.paymentService.createPaymentOrderWithProvider(
+        sessionId,
+        patientId,
+        consultationType as 'chat' | 'tele' | 'video' | 'emergency',
+        'Tenderly Healthcare Consultation',
+        'medium',
+        customerDetails,
+        requestMetadata
+      );
+
+      // Log audit event
+      await this.auditService.logDataAccess(
+        patientId,
+        'payment',
+        'create',
+        sessionId,
+        undefined,
+        {
+          sessionId,
+          consultationType,
+          paymentId: paymentResponse.paymentId,
+          amount: paymentResponse.amount,
+          currency: paymentResponse.currency,
+          razorpayPayment: true
+        },
+        requestMetadata
+      );
+
+      this.logger.log(`[${transactionId}] Razorpay payment created successfully: ${paymentResponse.paymentId}`);
+
+      return {
+        message: 'Razorpay payment order created successfully',
+        paymentId: paymentResponse.paymentId,
+        status: paymentResponse.status,
+        amount: paymentResponse.amount,
+        currency: paymentResponse.currency,
+        expiresAt: paymentResponse.expiresAt,
+        razorpayKey: this.configService.get('payment.razorpay.keyId'), // Add Razorpay key for frontend
+        nextStep: {
+          endpoint: '/consultations/confirm-payment',
+          description: 'Complete payment via Razorpay checkout'
+        }
+      };
+
+    } catch (error) {
+      this.logger.error(`[${transactionId}] Failed to create Razorpay payment: ${error.message}`, error.stack);
+      throw error;
+    }
+  }
 
 }

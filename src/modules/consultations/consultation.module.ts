@@ -23,6 +23,7 @@ import { PdfGenerationService } from './services/pdf-generation.service';
 import { DigitalSignatureService } from './services/digital-signature.service';
 import { FileStorageService } from './services/file-storage.service';
 import { PrescriptionService } from './services/prescription.service';
+import { PaymentsModule } from '../payments/payments.module';
 
 @Module({
   imports: [
@@ -34,6 +35,7 @@ import { PrescriptionService } from './services/prescription.service';
     ]),
     CacheModule,
     HttpModule,
+    PaymentsModule,
     ThrottlerModule.forRoot([
       {
         name: 'consultation-requests',

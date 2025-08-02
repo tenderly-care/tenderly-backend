@@ -19,6 +19,7 @@ import { RolesGuard } from './shared/guards/roles.guard';
 // Feature modules
 import { ConsultationModule } from './modules/consultations/consultation.module';
 import { UsersModule } from './modules/users/users.module';
+import { PaymentsModule } from './modules/payments/payments.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { UsersModule } from './modules/users/users.module';
     // Feature modules
     ConsultationModule,
     UsersModule,
+    PaymentsModule,
   ],
   controllers: [AppController],
   providers: [

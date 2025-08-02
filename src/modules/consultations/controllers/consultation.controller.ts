@@ -628,6 +628,34 @@ export class ConsultationController {
     );
   }
 
+  @Post('create-payment/:sessionId')
+  @ApiOperation({ 
+    summary: 'Create real Razorpay payment order',
+    description: 'Creates a real Razorpay payment order for the given session ID'
+  })
+  @ApiParam({ name: 'sessionId', description: 'Session ID for payment' })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Razorpay payment order created successfully' 
+  })
+  @Roles(UserRole.PATIENT)
+  async createRazorpayPayment(
+    @Param('sessionId') sessionId: string,
+    @GetUser() user: any,
+    @Req() req: Request
+  ) {
+    const requestMetadata = {
+      ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
+      userAgent: req.headers['user-agent'] || 'unknown'
+    };
+
+    return await this.consultationService.createRazorpayPayment(
+      sessionId,
+      user.id,
+      requestMetadata
+    );
+  }
+
   @Post('test-session-data')
   @Public()
   async testSessionData(@Body() testData: { sessionId: string }) {
