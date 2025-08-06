@@ -267,6 +267,15 @@ export class AuthResponseDto {
 
   @ApiProperty({ description: 'Available MFA methods' })
   mfaMethods?: string[];
+
+  @ApiProperty({ description: 'Whether MFA setup is required' })
+  requiresMFASetup?: boolean;
+
+  @ApiProperty({ description: 'Temporary token for MFA setup' })
+  temporaryToken?: string;
+
+  @ApiProperty({ description: 'Additional message' })
+  message?: string;
 }
 
 export class MFASetupResponseDto {

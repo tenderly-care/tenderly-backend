@@ -208,14 +208,40 @@ export class AuthService {
       if (loginCheck.reason === 'Please complete MFA setup before logging in') {
         await this.auditService.logAuthEvent(
           (user._id as string).toString(),
-          'failed_login',
+          'login_partial',
           ipAddress,
           userAgent,
-          false,
-          loginCheck.reason,
+          true,
+          'Password verified, MFA setup required',
         );
-        // Use 403 for "forbidden" - valid credentials but MFA setup needed
-        throw new ForbiddenException(loginCheck.reason);
+        
+        // Generate temporary token for MFA setup
+        const tempToken = await this.generateMFASetupToken(
+          user,
+          ipAddress,
+          userAgent,
+          deviceFingerprint,
+        );
+        
+        return {
+          accessToken: null,
+          refreshToken: null,
+          expiresIn: 0,
+          user: {
+            id: (user._id as string).toString(),
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            roles: user.roles,
+            accountStatus: user.accountStatus,
+            isEmailVerified: user.isEmailVerified,
+            isMFAEnabled: user.isMFAEnabled,
+            requiresMFA: user.requiresMFA(),
+          },
+          requiresMFASetup: true,
+          temporaryToken: tempToken,
+          message: 'Please complete MFA setup before logging in',
+        };
       }
       
       // For other login restrictions (locked, suspended, etc.)
@@ -650,6 +676,51 @@ export class AuthService {
       message:
         'Password changed successfully. Please log in again with your new password.',
     };
+  }
+
+  /**
+   * Generate temporary token for MFA setup
+   */
+  private async generateMFASetupToken(
+    user: UserDocument,
+    ipAddress: string,
+    userAgent: string,
+    deviceFingerprint?: string,
+  ): Promise<string> {
+    const setupSessionId = this.encryptionService.generateSecureToken();
+    
+    // Create temporary JWT payload with limited scope
+    const payload = {
+      sub: (user._id as string).toString(),
+      email: user.email,
+      roles: user.roles,
+      sessionId: setupSessionId,
+      deviceFingerprint,
+      type: 'mfa_setup', // Special type for MFA setup token
+      scope: 'mfa:setup', // Limited scope
+    };
+    
+    // Generate token with shorter expiry (30 minutes)
+    const setupToken = this.jwtService.sign(payload, {
+      expiresIn: '30m', // 30 minutes for MFA setup
+    });
+    
+    // Store session info for MFA setup
+    await this.cacheService.set(
+      `mfa_setup_session:${setupSessionId}`,
+      {
+        userId: (user._id as string).toString(),
+        ipAddress,
+        userAgent,
+        deviceFingerprint,
+        createdAt: new Date(),
+        purpose: 'mfa_setup',
+      },
+      30 * 60, // 30 minutes
+    );
+    
+    this.logger.debug(`Generated MFA setup token for user ${user.email}`);
+    return setupToken;
   }
 
   /**

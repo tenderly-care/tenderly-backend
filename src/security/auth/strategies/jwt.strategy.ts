@@ -25,12 +25,36 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
     super(strategyOptions);
   }
 
-  async validate(payload: JwtPayload): Promise<User> {
+  async validate(payload: any): Promise<User> {
     const user = await this.userModel.findById(payload.sub).exec();
     if (!user) {
       throw new UnauthorizedException('Invalid token or user not found');
     }
 
+    // Handle MFA setup tokens
+    if (payload.type === 'mfa_setup') {
+      // Check if MFA setup session is valid
+      const setupSessionKey = `mfa_setup_session:${payload.sessionId}`;
+      const setupSessionData = await this.cacheService.get(setupSessionKey);
+      if (!setupSessionData) {
+        throw new UnauthorizedException('MFA setup session expired or invalid');
+      }
+
+      // Ensure user actually needs MFA setup
+      if (!user.requiresMFA() || user.isMFAEnabled) {
+        throw new UnauthorizedException('MFA setup not required for this user');
+      }
+
+      if (user.accountStatus !== 'pending_mfa_setup') {
+        throw new UnauthorizedException('User account not in MFA setup state');
+      }
+
+      // Add flag to indicate this is an MFA setup token
+      (user as any).isMFASetupToken = true;
+      return user;
+    }
+
+    // Handle regular access tokens
     // Check if session is valid
     const sessionKey = `session:${payload.sessionId}`;
     const sessionData = await this.cacheService.get(sessionKey);
