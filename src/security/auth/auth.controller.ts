@@ -91,6 +91,7 @@ export class AuthController {
     type: AuthResponseDto,
   })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
+  @ApiResponse({ status: 403, description: 'Please complete MFA setup before logging in' })
   async login(
     @Body(ValidationPipe) loginDto: LoginDto,
     @Req() req: Request,

@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -180,21 +181,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Check if user can login
-    const loginCheck = user.canLogin();
-    if (!loginCheck.canLogin) {
-      await this.auditService.logAuthEvent(
-        (user._id as string).toString(),
-        'failed_login',
-        ipAddress,
-        userAgent,
-        false,
-        loginCheck.reason,
-      );
-      throw new UnauthorizedException(loginCheck.reason);
-    }
-
-    // Verify password
+    // First, verify password to ensure credentials are valid
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       await user.incrementFailedLogin();
@@ -212,6 +199,35 @@ export class AuthService {
     // Reset failed login attempts on successful password verification
     if (user.failedLoginAttempts > 0) {
       await user.resetFailedLogin();
+    }
+
+    // Now check if user can login (excluding MFA setup requirement)
+    const loginCheck = user.canLogin();
+    if (!loginCheck.canLogin) {
+      // Handle MFA setup requirement separately with proper status code
+      if (loginCheck.reason === 'Please complete MFA setup before logging in') {
+        await this.auditService.logAuthEvent(
+          (user._id as string).toString(),
+          'failed_login',
+          ipAddress,
+          userAgent,
+          false,
+          loginCheck.reason,
+        );
+        // Use 403 for "forbidden" - valid credentials but MFA setup needed
+        throw new ForbiddenException(loginCheck.reason);
+      }
+      
+      // For other login restrictions (locked, suspended, etc.)
+      await this.auditService.logAuthEvent(
+        (user._id as string).toString(),
+        'failed_login',
+        ipAddress,
+        userAgent,
+        false,
+        loginCheck.reason,
+      );
+      throw new UnauthorizedException(loginCheck.reason);
     }
 
     // Check MFA requirements
