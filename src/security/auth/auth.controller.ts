@@ -26,6 +26,7 @@ import { MFAService } from './services/mfa.service';
 import { AuditService } from '../audit/audit.service';
 import { JwtAuthGuard } from '../../shared/guards/jwt-auth.guard';
 import { RolesGuard } from '../../shared/guards/roles.guard';
+import { MFASetupGuard } from '../../shared/guards/mfa-setup.guard';
 import { Public } from '../../shared/decorators/public.decorator';
 import { GetUser } from '../../shared/decorators/get-user.decorator';
 import { Roles } from '../../shared/decorators/roles.decorator';
@@ -91,6 +92,7 @@ export class AuthController {
     type: AuthResponseDto,
   })
   @ApiResponse({ status: 401, description: 'Invalid credentials' })
+  @ApiResponse({ status: 403, description: 'Please complete MFA setup before logging in' })
   async login(
     @Body(ValidationPipe) loginDto: LoginDto,
     @Req() req: Request,
@@ -204,6 +206,7 @@ export class AuthController {
 
   // MFA Endpoints
   @Post('mfa/setup')
+  @UseGuards(JwtAuthGuard, MFASetupGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Initialize MFA setup' })
   @ApiResponse({
@@ -212,6 +215,7 @@ export class AuthController {
     type: MFASetupResponseDto,
   })
   @ApiResponse({ status: 400, description: 'MFA not required for this user' })
+  @ApiResponse({ status: 401, description: 'Requires MFA setup token' })
   async setupMFA(
     @GetUser() user: UserDocument,
     @Body(ValidationPipe) setupMFADto: SetupMFADto,
@@ -223,11 +227,12 @@ export class AuthController {
   }
 
   @Post('mfa/verify-setup')
+  @UseGuards(JwtAuthGuard, MFASetupGuard)
   @ApiBearerAuth()
   @ApiOperation({ summary: 'Verify and complete MFA setup' })
   @ApiResponse({ status: 200, description: 'MFA setup completed successfully' })
   @ApiResponse({ status: 400, description: 'Invalid verification code' })
-  @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.ADMIN, UserRole.SUPER_ADMIN, UserRole.SUPER_DOC)
+  @ApiResponse({ status: 401, description: 'Requires MFA setup token' })
   async verifyMFASetup(
     @GetUser() user: UserDocument,
     @Body(ValidationPipe) verifyMFASetupDto: VerifyMFASetupDto,

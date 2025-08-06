@@ -3,6 +3,7 @@ import {
   UnauthorizedException,
   BadRequestException,
   ConflictException,
+  ForbiddenException,
   Logger,
 } from '@nestjs/common';
 import { JwtService } from '@nestjs/jwt';
@@ -180,21 +181,7 @@ export class AuthService {
       throw new UnauthorizedException('Invalid credentials');
     }
 
-    // Check if user can login
-    const loginCheck = user.canLogin();
-    if (!loginCheck.canLogin) {
-      await this.auditService.logAuthEvent(
-        (user._id as string).toString(),
-        'failed_login',
-        ipAddress,
-        userAgent,
-        false,
-        loginCheck.reason,
-      );
-      throw new UnauthorizedException(loginCheck.reason);
-    }
-
-    // Verify password
+    // First, verify password to ensure credentials are valid
     const isPasswordValid = await bcrypt.compare(password, user.password);
     if (!isPasswordValid) {
       await user.incrementFailedLogin();
@@ -212,6 +199,61 @@ export class AuthService {
     // Reset failed login attempts on successful password verification
     if (user.failedLoginAttempts > 0) {
       await user.resetFailedLogin();
+    }
+
+    // Now check if user can login (excluding MFA setup requirement)
+    const loginCheck = user.canLogin();
+    if (!loginCheck.canLogin) {
+      // Handle MFA setup requirement separately with proper status code
+      if (loginCheck.reason === 'Please complete MFA setup before logging in') {
+        await this.auditService.logAuthEvent(
+          (user._id as string).toString(),
+          'login_partial',
+          ipAddress,
+          userAgent,
+          true,
+          'Password verified, MFA setup required',
+        );
+        
+        // Generate temporary token for MFA setup
+        const tempToken = await this.generateMFASetupToken(
+          user,
+          ipAddress,
+          userAgent,
+          deviceFingerprint,
+        );
+        
+        return {
+          accessToken: null,
+          refreshToken: null,
+          expiresIn: 0,
+          user: {
+            id: (user._id as string).toString(),
+            email: user.email,
+            firstName: user.firstName,
+            lastName: user.lastName,
+            roles: user.roles,
+            accountStatus: user.accountStatus,
+            isEmailVerified: user.isEmailVerified,
+            isMFAEnabled: user.isMFAEnabled,
+            requiresMFA: user.requiresMFA(),
+          },
+          requiresMFASetup: true,
+          temporaryToken: tempToken,
+          message: 'Please complete MFA setup before logging in',
+        };
+      }
+      
+      // For other login restrictions (locked, suspended, etc.)
+      await this.auditService.logAuthEvent(
+        (user._id as string).toString(),
+        'failed_login',
+        ipAddress,
+        userAgent,
+        false,
+        loginCheck.reason,
+      );
+      throw new UnauthorizedException(loginCheck.reason);
     }
 
     // Check MFA requirements
@@ -634,6 +676,51 @@ export class AuthService {
       message:
         'Password changed successfully. Please log in again with your new password.',
     };
+  }
+
+  /**
+   * Generate temporary token for MFA setup
+   */
+  private async generateMFASetupToken(
+    user: UserDocument,
+    ipAddress: string,
+    userAgent: string,
+    deviceFingerprint?: string,
+  ): Promise<string> {
+    const setupSessionId = this.encryptionService.generateSecureToken();
+    
+    // Create temporary JWT payload with limited scope
+    const payload = {
+      sub: (user._id as string).toString(),
+      email: user.email,
+      roles: user.roles,
+      sessionId: setupSessionId,
+      deviceFingerprint,
+      type: 'mfa_setup', // Special type for MFA setup token
+      scope: 'mfa:setup', // Limited scope
+    };
+    
+    // Generate token with shorter expiry (30 minutes)
+    const setupToken = this.jwtService.sign(payload, {
+      expiresIn: '30m', // 30 minutes for MFA setup
+    });
+    
+    // Store session info for MFA setup
+    await this.cacheService.set(
+      `mfa_setup_session:${setupSessionId}`,
+      {
+        userId: (user._id as string).toString(),
+        ipAddress,
+        userAgent,
+        deviceFingerprint,
+        createdAt: new Date(),
+        purpose: 'mfa_setup',
+      },
+      30 * 60, // 30 minutes
+    );
+    
+    this.logger.debug(`Generated MFA setup token for user ${user.email}`);
+    return setupToken;
   }
 
   /**
