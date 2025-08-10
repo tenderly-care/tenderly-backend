@@ -8,6 +8,9 @@ export default () => ({
     apiPrefix: process.env.API_PREFIX || 'api/v1',
     corsOrigins: process.env.CORS_ORIGINS?.split(',') || [
       'http://localhost:3000',
+      'http://localhost:3001',
+      'http://172.16.10.6:3001',
+      'http://172.16.10.6:3000',
     ],
   },
 

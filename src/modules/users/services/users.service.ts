@@ -75,6 +75,10 @@ export class UsersService {
         typeof q === 'string' ? q : `${q.degree} from ${q.institution} (${q.year})`
       ) || user.professionalInfo?.qualification,
     } as any;
+    
+    // CRITICAL: Mark the professionalInfo field as modified for Mongoose
+    user.markModified('professionalInfo');
+    
     user.lastProfileUpdate = new Date();
     await user.save();
 
@@ -119,7 +123,12 @@ export class UsersService {
     if (!user.professionalInfo) {
       user.professionalInfo = {};
     }
+    
     user.professionalInfo.availableSlots = updateDto.availableSlots;
+    
+    // CRITICAL: Mark the professionalInfo field as modified for Mongoose
+    user.markModified('professionalInfo');
+    
     user.lastProfileUpdate = new Date();
     await user.save();
 

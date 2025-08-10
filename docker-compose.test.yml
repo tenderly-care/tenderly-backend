@@ -1,0 +1,137 @@
+services:
+  # MongoDB Database
+  mongodb:
+    image: mongo:7.0
+    container_name: tenderly-mongodb
+    restart: unless-stopped
+    environment:
+      MONGO_INITDB_ROOT_USERNAME: ${MONGO_ROOT_USERNAME:-admin}
+      MONGO_INITDB_ROOT_PASSWORD: ${MONGO_ROOT_PASSWORD:-securepassword}
+      MONGO_INITDB_DATABASE: ${MONGO_DATABASE:-tenderly}
+    ports:
+      - "27018:27017"
+    volumes:
+      - mongodb_data:/data/db
+      - mongodb_config:/data/configdb
+      - ./docker/mongodb/mongo-init.js:/docker-entrypoint-initdb.d/mongo-init.js:ro
+    networks:
+      - tenderly-network
+    healthcheck:
+      test: ["CMD", "mongosh", "--eval", "db.adminCommand('ping')"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
+
+  # Redis Cache
+  redis:
+    image: redis:7.2-alpine
+    container_name: tenderly-redis
+    restart: unless-stopped
+    command: redis-server --appendonly yes --requirepass ${REDIS_PASSWORD:-redispassword}
+    ports:
+      - "6380:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - tenderly-network
+    healthcheck:
+      test: ["CMD", "redis-cli", "--raw", "incr", "ping"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  # Tenderly Backend API
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile.minimal
+    image: tenderly-backend:minimal
+    container_name: tenderly-backend
+    restart: unless-stopped
+    depends_on:
+      mongodb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      # Application
+      NODE_ENV: development
+      PORT: 3000
+      API_PREFIX: api/v1
+      
+      # Security
+      JWT_SECRET: ${JWT_SECRET:-your-super-secret-jwt-key-change-in-production}
+      JWT_ACCESS_EXPIRY: ${JWT_ACCESS_EXPIRY:-15m}
+      JWT_REFRESH_EXPIRY: ${JWT_REFRESH_EXPIRY:-7d}
+      DATA_ENCRYPTION_KEY: ${DATA_ENCRYPTION_KEY:-your-32-character-encryption-key-here}
+      
+      # Database
+      MONGODB_URI: mongodb://${MONGO_ROOT_USERNAME:-admin}:${MONGO_ROOT_PASSWORD:-securepassword}@mongodb:27017/${MONGO_DATABASE:-tenderly}?authSource=admin
+      
+      # Redis
+      REDIS_HOST: redis
+      REDIS_PORT: 6379
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-redispassword}
+      REDIS_DB: ${REDIS_DB:-0}
+      REDIS_KEY_PREFIX: ${REDIS_KEY_PREFIX:-tenderly:}
+      REDIS_TTL: ${REDIS_TTL:-3600}
+      
+      # CORS
+      CORS_ORIGINS: ${CORS_ORIGINS:-http://localhost:3000,http://localhost:3001}
+      
+      # Rate Limiting
+      RATE_LIMIT_TTL: ${RATE_LIMIT_TTL:-60}
+      RATE_LIMIT_REQUESTS: ${RATE_LIMIT_REQUESTS:-100}
+      
+      # Logging
+      LOG_LEVEL: debug
+      LOG_FORMAT: json
+      
+      # AI Services
+      AI_DIAGNOSIS_URL: ${AI_DIAGNOSIS_URL:-http://localhost:8000}
+      AI_DIAGNOSIS_API_KEY: ${AI_DIAGNOSIS_API_KEY:-your-api-key-here}
+      AI_DIAGNOSIS_SECRET_KEY: ${AI_DIAGNOSIS_SECRET_KEY:-shared-jwt-secret-key-for-ai-agent}
+      AI_SERVICE_NAME: ${AI_SERVICE_NAME:-tenderly-backend}
+      AI_DIAGNOSIS_TIMEOUT: ${AI_DIAGNOSIS_TIMEOUT:-30000}
+      
+      # Payment Gateway
+      PAYMENT_PROVIDER: ${PAYMENT_PROVIDER:-mock}
+      RAZORPAY_ENVIRONMENT: ${RAZORPAY_ENVIRONMENT:-sandbox}
+      RAZORPAY_SANDBOX_KEY_ID: ${RAZORPAY_SANDBOX_KEY_ID:-rzp_test_XAMSIj8UnomAdh}
+      RAZORPAY_SANDBOX_KEY_SECRET: ${RAZORPAY_SANDBOX_KEY_SECRET:-2NTGD3hh8qZdNiHNJBBIkdOM}
+      
+      # Features
+      FEATURE_AI_DIAGNOSIS: ${FEATURE_AI_DIAGNOSIS:-true}
+      FEATURE_VIDEO_CONSULTATION: ${FEATURE_VIDEO_CONSULTATION:-true}
+      FEATURE_MFA_REQUIRED: ${FEATURE_MFA_REQUIRED:-true}
+      
+      # Audit & Compliance
+      AUDIT_ENABLED: ${AUDIT_ENABLED:-true}
+      GDPR_ENABLED: ${GDPR_ENABLED:-true}
+      
+    ports:
+      - "3000:3000"
+    volumes:
+      - ./uploads:/app/uploads
+    networks:
+      - tenderly-network
+    healthcheck:
+      test: ["CMD", "node", "/app/health-check.js"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+volumes:
+  mongodb_data:
+    driver: local
+  mongodb_config:
+    driver: local
+  redis_data:
+    driver: local
+
+networks:
+  tenderly-network:
+    driver: bridge
