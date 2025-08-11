@@ -23,6 +23,7 @@ import { UserRole } from '../../users/schemas/user.schema';
 import { Request } from 'express';
 import { ThrottlerGuard } from '@nestjs/throttler';
 import { UsePipes, ValidationPipe } from '@nestjs/common';
+// StructuredDiagnosisResponseDto is defined locally in this controller
 
 // DTOs for structured diagnosis
 export class StructuredDiagnosisRequestDto {
@@ -65,7 +66,8 @@ export class StructuredDiagnosisRequestDto {
   [key: string]: any;
 }
 
-export class StructuredDiagnosisResponseDto {
+// Response DTO for diagnosis controller API endpoints
+export class DiagnosisApiResponseDto {
   diagnosis: string;
   confidence_score: number;
   severity_assessment: {
@@ -137,7 +139,7 @@ export class DiagnosisController {
   @ApiResponse({ 
     status: HttpStatus.OK, 
     description: 'Structured diagnosis generated successfully',
-    type: StructuredDiagnosisResponseDto
+    type: DiagnosisApiResponseDto
   })
   @ApiResponse({ 
     status: HttpStatus.BAD_REQUEST, 
@@ -189,7 +191,7 @@ export class DiagnosisController {
     @Body() diagnosisRequest: StructuredDiagnosisRequestDto,
     @GetUser() user: any,
     @Req() req: Request
-  ): Promise<StructuredDiagnosisResponseDto> {
+  ): Promise<DiagnosisApiResponseDto> {
     const startTime = Date.now();
     
     try {

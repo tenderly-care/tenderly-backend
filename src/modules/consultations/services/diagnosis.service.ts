@@ -5,7 +5,7 @@ import { firstValueFrom } from 'rxjs';
 import { AxiosResponse } from 'axios';
 import { CacheService } from '../../../core/cache/cache.service';
 import { AuditService } from '../../../security/audit/audit.service';
-import { StructuredDiagnosisRequestDto, StructuredDiagnosisResponseDto } from '../controllers/diagnosis.controller';
+import { StructuredDiagnosisRequestDto, DiagnosisApiResponseDto } from '../controllers/diagnosis.controller';
 
 export interface RequestMetadata {
   ipAddress: string;
@@ -56,7 +56,7 @@ export class DiagnosisService {
   async getStructuredDiagnosis(
     diagnosisRequest: StructuredDiagnosisRequestDto,
     requestMetadata: RequestMetadata
-  ): Promise<StructuredDiagnosisResponseDto> {
+  ): Promise<DiagnosisApiResponseDto> {
     const startTime = Date.now();
     
     try {
@@ -201,7 +201,7 @@ export class DiagnosisService {
   private async makeStructuredDiagnosisRequest(
     payload: StructuredDiagnosisRequestDto,
     requestMetadata: RequestMetadata
-  ): Promise<StructuredDiagnosisResponseDto> {
+  ): Promise<DiagnosisApiResponseDto> {
     let lastError: Error = new Error('Failed to make diagnosis request');
     
     for (let attempt = 1; attempt <= this.maxRetries; attempt++) {
@@ -227,8 +227,8 @@ export class DiagnosisService {
           endpoint: '/api/v1/diagnosis/structure'
         });
         
-        const response: AxiosResponse<StructuredDiagnosisResponseDto> = await firstValueFrom(
-          this.httpService.post<StructuredDiagnosisResponseDto>(
+        const response: AxiosResponse<DiagnosisApiResponseDto> = await firstValueFrom(
+          this.httpService.post<DiagnosisApiResponseDto>(
             `${this.aiAgentUrl}/api/v1/diagnosis/structure`, 
             payload, 
             {
@@ -313,7 +313,7 @@ export class DiagnosisService {
   /**
    * Validate AI response
    */
-  private validateAIResponse(response: StructuredDiagnosisResponseDto): void {
+  private validateAIResponse(response: DiagnosisApiResponseDto): void {
     if (!response) {
       throw new Error('Empty response from AI agent');
     }
@@ -341,7 +341,7 @@ export class DiagnosisService {
    */
   private async logDiagnosisRequest(
     request: StructuredDiagnosisRequestDto,
-    response: StructuredDiagnosisResponseDto | null,
+    response: DiagnosisApiResponseDto | null,
     fromCache: boolean,
     requestMetadata: RequestMetadata,
     errorMessage?: string
@@ -387,7 +387,7 @@ export class DiagnosisService {
   /**
    * Sanitize response for audit logging
    */
-  private sanitizeDiagnosisResponse(response: StructuredDiagnosisResponseDto): any {
+  private sanitizeDiagnosisResponse(response: DiagnosisApiResponseDto): any {
     return {
       diagnosisLength: response.diagnosis.length,
       confidence_score: response.confidence_score,
@@ -412,7 +412,7 @@ export class DiagnosisService {
   /**
    * Provide fallback structured diagnosis when AI agent is unavailable
    */
-  private getFallbackStructuredDiagnosis(request: StructuredDiagnosisRequestDto): StructuredDiagnosisResponseDto {
+  private getFallbackStructuredDiagnosis(request: StructuredDiagnosisRequestDto): DiagnosisApiResponseDto {
     this.logger.warn('Providing fallback structured diagnosis due to AI agent unavailability');
     
     const severity = this.determineFallbackSeverity(request);

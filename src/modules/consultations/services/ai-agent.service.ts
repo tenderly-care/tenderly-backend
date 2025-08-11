@@ -3,7 +3,7 @@ import { ConfigService } from '@nestjs/config';
 import { HttpService } from '@nestjs/axios';
 import { firstValueFrom } from 'rxjs';
 import { AxiosResponse } from 'axios';
-import { SymptomInputDto, AIDiagnosisResponseDto, TenderlyAIAgentRequestDto, PureAIAgentResponseDto, StructuredDiagnosisResponseDto } from '../dto/consultation.dto';
+import { SymptomInputDto, AIDiagnosisResponseDto, TenderlyAIAgentRequestDto, PureAIAgentResponseDto, AIStructuredDiagnosisResponseDto } from '../dto/consultation.dto';
 import { CacheService } from '../../../core/cache/cache.service';
 import { AuditService } from '../../../security/audit/audit.service';
 import { AITokenService } from './ai-token.service';
@@ -597,7 +597,7 @@ this.logger.error('AI diagnosis API key not configured - service will not work w
     patientId: string,
     structuredData: any,
     requestMetadata?: { ipAddress: string; userAgent: string }
-  ): Promise<StructuredDiagnosisResponseDto> {
+  ): Promise<AIStructuredDiagnosisResponseDto> {
     const startTime = Date.now();
     const sessionId = `structured_${patientId}_${Date.now()}`;
     
@@ -1426,7 +1426,7 @@ this.logger.error('AI diagnosis API key not configured - service will not work w
     structuredData: any,
     sessionId: string,
     patientId: string
-  ): Promise<StructuredDiagnosisResponseDto> {
+  ): Promise<AIStructuredDiagnosisResponseDto> {
     let lastError: Error = new Error('Failed to make structured request');
     let currentToken: string | null = null;
     
@@ -1470,8 +1470,8 @@ this.logger.error('AI diagnosis API key not configured - service will not work w
           payloadSize: JSON.stringify(structuredData).length
         });
         
-        const response: AxiosResponse<StructuredDiagnosisResponseDto> = await firstValueFrom(
-          this.httpService.post<StructuredDiagnosisResponseDto>(`${this.aiAgentUrl}/api/v1/diagnosis/structure`, structuredData, {
+        const response: AxiosResponse<AIStructuredDiagnosisResponseDto> = await firstValueFrom(
+          this.httpService.post<AIStructuredDiagnosisResponseDto>(`${this.aiAgentUrl}/api/v1/diagnosis/structure`, structuredData, {
             headers,
             timeout: this.requestTimeout,
           })
@@ -1544,7 +1544,7 @@ this.logger.error('AI diagnosis API key not configured - service will not work w
     throw lastError;
   }
 
-  private validateStructuredResponse(response: StructuredDiagnosisResponseDto): void {
+  private validateStructuredResponse(response: AIStructuredDiagnosisResponseDto): void {
     if (!response.request_id) {
       throw new Error('Invalid response: request_id is missing');
     }
@@ -1566,7 +1566,7 @@ this.logger.error('AI diagnosis API key not configured - service will not work w
     patientId: string,
     sessionId: string,
     structuredData: any,
-    response: StructuredDiagnosisResponseDto | null,
+    response: AIStructuredDiagnosisResponseDto | null,
     fromCache: boolean,
     requestMetadata?: { ipAddress: string; userAgent: string },
     errorMessage?: string
@@ -1613,7 +1613,7 @@ this.logger.error('AI diagnosis API key not configured - service will not work w
     };
   }
 
-  private sanitizeStructuredResponse(response: StructuredDiagnosisResponseDto): any {
+  private sanitizeStructuredResponse(response: AIStructuredDiagnosisResponseDto): any {
     if (!response) return null;
     
     return {
@@ -1627,7 +1627,7 @@ this.logger.error('AI diagnosis API key not configured - service will not work w
     };
   }
 
-  private getStructuredFallbackDiagnosis(structuredData: any): StructuredDiagnosisResponseDto {
+  private getStructuredFallbackDiagnosis(structuredData: any): AIStructuredDiagnosisResponseDto {
     const mainSymptom = structuredData.structured_request?.primary_complaint?.main_symptom || 'General symptoms';
     const patientAge = structuredData.structured_request?.patient_profile?.age || 25;
     
