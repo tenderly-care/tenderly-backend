@@ -3,9 +3,11 @@ import { MongooseModule } from '@nestjs/mongoose';
 import { ThrottlerModule } from '@nestjs/throttler';
 import { HttpModule } from '@nestjs/axios';
 import { ConsultationController } from './controllers/consultation.controller';
+import { DiagnosisController } from './controllers/diagnosis.controller';
 import { DoctorShiftController } from './controllers/doctor-shift.controller';
 import { PrescriptionController } from './controllers/prescription.controller';
 import { ConsultationService } from './services/consultation.service';
+import { DiagnosisService } from './services/diagnosis.service';
 import { DoctorShiftService } from './services/doctor-shift.service';
 import { AIAgentService } from './services/ai-agent.service';
 import { AITokenService } from './services/ai-token.service';
@@ -44,9 +46,10 @@ import { PaymentsModule } from '../payments/payments.module';
       },
     ]),
   ],
-  controllers: [ConsultationController, DoctorShiftController, PrescriptionController],
+  controllers: [ConsultationController, DiagnosisController, DoctorShiftController, PrescriptionController],
   providers: [
     ConsultationService,
+    DiagnosisService,
     ConsultationBusinessService,
     DoctorAssignmentService,
     AIAgentService,
@@ -62,6 +65,7 @@ import { PaymentsModule } from '../payments/payments.module';
   ],
   exports: [
     ConsultationService,
+    DiagnosisService,
     ConsultationBusinessService,
     AIAgentService,
     PaymentService,

@@ -11,9 +11,6 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
           configService.get<string>('app.env') === 'production';
         return {
           uri: configService.get<string>('database.mongodb.uri'),
-          // Basic options for development
-          useNewUrlParser: true,
-          useUnifiedTopology: true,
           // Production security options
           ...(isProduction && {
             ssl: true,

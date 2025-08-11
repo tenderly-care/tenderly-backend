@@ -64,66 +64,128 @@ export class DoctorShiftService {
   }
 
   /**
-   * Get active doctor for current time
+   * Get active doctor for current time - Production Enhanced Version
    */
-  async getActiveDoctorForCurrentTime(): Promise<string | null> {
+  async getActiveDoctorForCurrentTime(bypassCache: boolean = false): Promise<string | null> {
+    const startTime = Date.now();
+    const requestId = `shift-${Date.now()}-${Math.random().toString(36).substr(2, 9)}`;
+    
     try {
       const now = new Date();
       const currentHour = now.getHours();
       
-      // Try cache first
-      const cacheKey = `${this.CACHE_PREFIX}current-doctor:${currentHour}`;
-      let cachedDoctor = await this.cacheService.get(cacheKey);
+      this.logger.debug(`[${requestId}] Getting active doctor for hour ${currentHour} at ${now.toISOString()}`);
       
-      if (cachedDoctor) {
-        return cachedDoctor;
+      // Try cache first (unless bypassed)
+      const cacheKey = `${this.CACHE_PREFIX}current-doctor:${currentHour}`;
+      if (!bypassCache) {
+        let cachedDoctor = await this.cacheService.get(cacheKey);
+        if (cachedDoctor) {
+          this.logger.debug(`[${requestId}] Cache hit - returning doctor: ${cachedDoctor}`);
+          return cachedDoctor;
+        }
+      } else {
+        this.logger.debug(`[${requestId}] Cache bypassed for real-time lookup`);
       }
 
-      // Find active shift for current time
-      const activeShift = await this.doctorShiftModel.findOne({
+      // Enhanced query with better logging
+      this.logger.debug(`[${requestId}] Querying database for active shifts...`);
+      
+      // Query for active shifts during current hour
+      const activeShifts = await this.doctorShiftModel.find({
         status: ShiftStatus.ACTIVE,
-        startHour: { $lte: currentHour },
-        endHour: { $gt: currentHour },
-        $and: [
-          {
-            $or: [
-              { effectiveFrom: { $lte: now } },
-              { effectiveFrom: null }
-            ]
-          },
-          {
-            $or: [
-              { effectiveTo: { $gte: now } },
-              { effectiveTo: null }
-            ]
-          }
+        effectiveFrom: { $lte: now },
+        $or: [
+          { effectiveTo: { $gte: now } },
+          { effectiveTo: null }
         ]
-      }).exec();
+      })
+      .sort({ createdAt: -1 }) // Get most recent first
+      .exec();
 
-      if (!activeShift) {
-        // Fallback to default assignments if no active shift found
-        const fallbackDoctorId = currentHour >= 7 && currentHour < 16 
-          ? '687664ac2478464bb482b84a' // Dr. Test Madam
-          : '687656c3e69fa2e8923dbc2c'; // Dr. Sarah Ashar
+      this.logger.debug(`[${requestId}] Found ${activeShifts.length} potentially active shifts`);
+      
+      if (activeShifts.length > 0) {
+        // Log all found shifts for debugging
+        activeShifts.forEach((shift, index) => {
+          this.logger.debug(`[${requestId}] Shift ${index}: Type=${shift.shiftType}, Doctor=${shift.doctorId}, Hours=${shift.startHour}-${shift.endHour}, Status=${shift.status}`);
+        });
+      }
+
+      // Find the best matching shift
+      let selectedShift: DoctorShiftDocument | null = null;
+      for (const shift of activeShifts) {
+        const isInTimeRange = this.isCurrentTimeInShift(currentHour, shift.startHour, shift.endHour);
+        this.logger.debug(`[${requestId}] Shift ${shift.shiftType} (${shift.startHour}-${shift.endHour}): Time match = ${isInTimeRange}`);
         
-        // Cache for 30 minutes
-        await this.cacheService.set(cacheKey, fallbackDoctorId, 1800);
+        if (isInTimeRange) {
+          selectedShift = shift;
+          break; // Take first matching shift
+        }
+      }
+
+      if (!selectedShift) {
+        this.logger.warn(`[${requestId}] No active shift found for hour ${currentHour}, using fallback`);
+        
+        // Enhanced fallback logic
+        const fallbackDoctorId = this.getFallbackDoctorId(currentHour);
+        
+        // Cache fallback for shorter duration
+        await this.cacheService.set(cacheKey, fallbackDoctorId, 900); // 15 minutes
+        
+        this.logger.warn(`[${requestId}] Fallback doctor assigned: ${fallbackDoctorId} for hour ${currentHour}`);
         return fallbackDoctorId;
       }
 
-      const doctorId = activeShift.doctorId.toString();
+      const doctorId = selectedShift.doctorId.toString();
       
       // Cache for 30 minutes
       await this.cacheService.set(cacheKey, doctorId, 1800);
       
+      const processingTime = Date.now() - startTime;
+      this.logger.log(`[${requestId}] Active doctor resolved: ${doctorId} (shift: ${selectedShift.shiftType}, hours: ${selectedShift.startHour}-${selectedShift.endHour}) in ${processingTime}ms`);
+      
       return doctorId;
+      
     } catch (error) {
-      this.logger.error('Failed to get active doctor:', error.message);
-      // Return fallback doctor
+      const processingTime = Date.now() - startTime;
+      this.logger.error(`[${requestId}] Failed to get active doctor after ${processingTime}ms:`, error.message, error.stack);
+      
+      // Enhanced fallback with error logging
       const currentHour = new Date().getHours();
-      return currentHour >= 7 && currentHour < 16 
-        ? '687664ac2478464bb482b84a' 
-        : '687656c3e69fa2e8923dbc2c';
+      const fallbackDoctorId = this.getFallbackDoctorId(currentHour);
+      
+      this.logger.error(`[${requestId}] Using emergency fallback doctor: ${fallbackDoctorId} due to error: ${error.message}`);
+      
+      return fallbackDoctorId;
+    }
+  }
+  
+  /**
+   * Helper method to check if current time falls within shift hours
+   */
+  private isCurrentTimeInShift(currentHour: number, startHour: number, endHour: number): boolean {
+    if (startHour < endHour) {
+      // Normal shift (e.g., 8-16)
+      return currentHour >= startHour && currentHour < endHour;
+    } else {
+      // Overnight shift (e.g., 22-6)
+      return currentHour >= startHour || currentHour < endHour;
+    }
+  }
+  
+  /**
+   * Get fallback doctor ID based on current hour
+   */
+  private getFallbackDoctorId(currentHour: number): string {
+    // Enhanced fallback logic
+    if (currentHour >= 6 && currentHour < 16) {
+      return '687664ac2478464bb482b84a'; // Dr. Test Madam (Morning/Day)
+    } else if (currentHour >= 16 && currentHour < 24) {
+      return '687656c3e69fa2e8923dbc2c'; // Dr. Sarah Ashar (Evening)
+    } else {
+      // Night hours (0-6): Use evening doctor as fallback
+      return '687656c3e69fa2e8923dbc2c'; // Dr. Sarah Ashar (Night fallback)
     }
   }
 
@@ -302,17 +364,192 @@ export class DoctorShiftService {
     }
   }
 
+  /**
+   * Production-grade cache clearing with comprehensive cleanup
+   */
   private async clearShiftCache(): Promise<void> {
+    const clearingId = `cache-clear-${Date.now()}`;
     try {
-      // Clear all shift-related cache keys
-      await this.cacheService.delete(`${this.CACHE_PREFIX}all-shifts`);
+      this.logger.log(`[${clearingId}] Starting comprehensive shift cache clearing...`);
+      
+      const clearPromises: Promise<void>[] = [];
+      
+      // Clear main cache keys
+      clearPromises.push(this.cacheService.delete(`${this.CACHE_PREFIX}all-shifts`));
       
       // Clear current doctor cache for all hours
       for (let hour = 0; hour < 24; hour++) {
-        await this.cacheService.delete(`${this.CACHE_PREFIX}current-doctor:${hour}`);
+        clearPromises.push(this.cacheService.delete(`${this.CACHE_PREFIX}current-doctor:${hour}`));
       }
+      
+      // Clear doctor assignment cache that might be stale
+      clearPromises.push(this.cacheService.delete('doctor-assignment:*'));
+      
+      await Promise.allSettled(clearPromises);
+      
+      this.logger.log(`[${clearingId}] Shift cache cleared successfully`);
     } catch (error) {
-      this.logger.error('Failed to clear shift cache:', error.message);
+      this.logger.error(`[${clearingId}] Failed to clear shift cache:`, error.message);
+    }
+  }
+  
+  /**
+   * Force refresh current doctor (for production debugging)
+   */
+  async forceRefreshCurrentDoctor(): Promise<{
+    doctorId: string;
+    source: 'database' | 'fallback';
+    shiftInfo?: any;
+    debugInfo: {
+      currentHour: number;
+      timestamp: string;
+      activeShiftsFound: number;
+      processingTimeMs: number;
+    };
+  }> {
+    const startTime = Date.now();
+    const now = new Date();
+    const currentHour = now.getHours();
+    
+    try {
+      this.logger.log('Force refreshing current doctor - bypassing all caches');
+      
+      // Clear cache first
+      await this.clearShiftCache();
+      
+      // Get fresh data from database
+      const doctorId = await this.getActiveDoctorForCurrentTime(true); // Bypass cache
+      
+      // Get additional debug info
+      const activeShifts = await this.doctorShiftModel.find({
+        status: ShiftStatus.ACTIVE,
+        effectiveFrom: { $lte: now },
+        $or: [
+          { effectiveTo: { $gte: now } },
+          { effectiveTo: null }
+        ]
+      }).exec();
+      
+      const matchingShift = activeShifts.find(shift => 
+        this.isCurrentTimeInShift(currentHour, shift.startHour, shift.endHour)
+      );
+      
+      const processingTime = Date.now() - startTime;
+      
+      return {
+        doctorId: doctorId || this.getFallbackDoctorId(currentHour),
+        source: matchingShift ? 'database' : 'fallback',
+        shiftInfo: matchingShift ? {
+          shiftType: matchingShift.shiftType,
+          startHour: matchingShift.startHour,
+          endHour: matchingShift.endHour,
+          doctorId: matchingShift.doctorId.toString(),
+          status: matchingShift.status,
+          effectiveFrom: matchingShift.effectiveFrom,
+          effectiveTo: matchingShift.effectiveTo
+        } : null,
+        debugInfo: {
+          currentHour,
+          timestamp: now.toISOString(),
+          activeShiftsFound: activeShifts.length,
+          processingTimeMs: processingTime
+        }
+      };
+      
+    } catch (error) {
+      const processingTime = Date.now() - startTime;
+      this.logger.error('Force refresh failed:', error.message);
+      
+      return {
+        doctorId: this.getFallbackDoctorId(currentHour),
+        source: 'fallback',
+        debugInfo: {
+          currentHour,
+          timestamp: now.toISOString(),
+          activeShiftsFound: 0,
+          processingTimeMs: processingTime
+        }
+      };
+    }
+  }
+  
+  /**
+   * Get comprehensive shift debugging information
+   */
+  async getShiftDebugInfo(): Promise<{
+    currentTime: {
+      utc: string;
+      local: string;
+      hour: number;
+      timezone: string;
+    };
+    allShifts: any[];
+    activeShifts: any[];
+    currentDoctorInfo: {
+      cached: string | null;
+      fresh: string | null;
+    };
+    fallbackDoctor: string;
+  }> {
+    const now = new Date();
+    const currentHour = now.getHours();
+    
+    try {
+      // Get all shifts
+      const allShifts = await this.doctorShiftModel.find({}).exec();
+      
+      // Get active shifts
+      const activeShifts = await this.doctorShiftModel.find({
+        status: ShiftStatus.ACTIVE,
+        effectiveFrom: { $lte: now },
+        $or: [
+          { effectiveTo: { $gte: now } },
+          { effectiveTo: null }
+        ]
+      }).exec();
+      
+      // Get current doctor (cached)
+      const cachedDoctor = await this.cacheService.get(`${this.CACHE_PREFIX}current-doctor:${currentHour}`);
+      
+      // Get current doctor (fresh)
+      const freshDoctor = await this.getActiveDoctorForCurrentTime(true);
+      
+      return {
+        currentTime: {
+          utc: now.toISOString(),
+          local: now.toString(),
+          hour: currentHour,
+          timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
+        },
+        allShifts: allShifts.map(shift => ({
+          id: (shift as any)._id.toString(),
+          shiftType: shift.shiftType,
+          doctorId: shift.doctorId.toString(),
+          startHour: shift.startHour,
+          endHour: shift.endHour,
+          status: shift.status,
+          effectiveFrom: shift.effectiveFrom,
+          effectiveTo: shift.effectiveTo,
+          notes: shift.notes,
+          isTimeMatch: this.isCurrentTimeInShift(currentHour, shift.startHour, shift.endHour)
+        })),
+        activeShifts: activeShifts.map(shift => ({
+          id: (shift as any)._id.toString(),
+          shiftType: shift.shiftType,
+          doctorId: shift.doctorId.toString(),
+          startHour: shift.startHour,
+          endHour: shift.endHour,
+          isTimeMatch: this.isCurrentTimeInShift(currentHour, shift.startHour, shift.endHour)
+        })),
+        currentDoctorInfo: {
+          cached: cachedDoctor,
+          fresh: freshDoctor
+        },
+        fallbackDoctor: this.getFallbackDoctorId(currentHour)
+      };
+    } catch (error) {
+      this.logger.error('Failed to get shift debug info:', error.message);
+      throw error;
     }
   }
 }

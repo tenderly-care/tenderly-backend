@@ -104,11 +104,10 @@ AuditLogSchema.index({ userId: 1, timestamp: -1 });
 AuditLogSchema.index({ resourceType: 1, action: 1 });
 AuditLogSchema.index({ category: 1, severity: 1 });
 AuditLogSchema.index({ timestamp: -1 });
-AuditLogSchema.index({ retentionDate: 1 });
 AuditLogSchema.index({ 'complianceFlags.ndhm': 1 });
 AuditLogSchema.index({ 'complianceFlags.gdpr': 1 });
 AuditLogSchema.index({ fingerprint: 1 }, { unique: true });
 AuditLogSchema.index({ ipAddress: 1, timestamp: -1 });
 
-// TTL index for automatic cleanup
+// TTL index for automatic cleanup (this combines both retentionDate indexes)
 AuditLogSchema.index({ retentionDate: 1 }, { expireAfterSeconds: 0 });

@@ -1748,8 +1748,8 @@ export class GynecologicalAssessmentDto {
 
 
 
-// Response DTO for structured diagnosis
-export class StructuredDiagnosisResponseDto {
+// Response DTO for AI agent structured diagnosis (different from controller version)
+export class AIStructuredDiagnosisResponseDto {
   @ApiProperty({ description: 'Request ID' })
   @IsString()
   request_id: string;

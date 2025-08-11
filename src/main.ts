@@ -50,7 +50,7 @@ async function bootstrap() {
     origin: configService.get<string[]>('app.corsOrigins'),
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'OPTIONS'],
-    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With'],
+    allowedHeaders: ['Content-Type', 'Authorization', 'X-Requested-With', 'X-API-Key', 'X-Service-Name'],
   });
 
   // Global validation pipe
@@ -86,6 +86,7 @@ async function bootstrap() {
       .addTag('Audit', 'Audit and logging services')
       .addTag('Devices', 'Device verification and management')
       .addTag('Consultations', 'Medical consultations features')
+      .addTag('Diagnosis', 'AI-powered medical diagnosis services')
       .addTag('Doctor Shifts', 'Doctor shift management and assignment')
       .addTag('Prescriptions', 'Digital prescriptions handling')
       .addTag('Payments', 'Payment processing and management')

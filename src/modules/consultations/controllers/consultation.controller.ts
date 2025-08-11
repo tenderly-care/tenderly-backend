@@ -39,7 +39,7 @@ import {
   AIAgentSymptomCollectionDto, 
   AIDiagnosisResponseDto,
   GynecologicalAssessmentDto,
-  StructuredDiagnosisResponseDto,
+  AIStructuredDiagnosisResponseDto,
   PaymentConfirmationDto
 } from '../dto/consultation.dto';
 import { ConsultationStatus, ConsultationType } from '../schemas/consultation.schema';
@@ -286,14 +286,17 @@ export class ConsultationController {
   @ApiResponse({ 
     status: HttpStatus.OK, 
     description: 'Structured assessment completed',
-    type: StructuredDiagnosisResponseDto
+    schema: {
+      type: 'object',
+      description: 'Structured diagnosis response with comprehensive medical assessment'
+    }
   })
   @Roles(UserRole.PATIENT)
   async collectStructuredSymptoms(
     @Body() body: any,
     @GetUser() user: any,
     @Req() req: Request
-  ): Promise<StructuredDiagnosisResponseDto & { consultationId: string; clinicalSessionId: string; consultationPricing: any; paymentVerified: boolean }> {
+  ): Promise<AIStructuredDiagnosisResponseDto & { consultationId: string; clinicalSessionId: string; consultationPricing: any; paymentVerified: boolean }> {
     const requestMetadata = {
       ipAddress: req.ip || req.socket.remoteAddress || 'unknown',
       userAgent: req.headers['user-agent'] || 'unknown'

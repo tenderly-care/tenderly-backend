@@ -307,7 +307,7 @@ export class User {
 export const UserSchema = SchemaFactory.createForClass(User);
 
 // Indexes for performance and uniqueness
-UserSchema.index({ email: 1 }, { unique: true });
+// Note: email and phone uniqueness are handled by the @Prop({ unique: true }) decorator
 UserSchema.index({ phone: 1 }, { unique: true });
 UserSchema.index({ 'ndhm.healthId': 1 }, { sparse: true });
 UserSchema.index({ 'ndhm.abhaNumber': 1 }, { sparse: true });

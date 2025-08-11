@@ -162,6 +162,34 @@ export class DoctorShiftController {
     };
   }
 
+  @Get('debug')
+  @ApiOperation({ 
+    summary: 'Get comprehensive shift debugging information',
+    description: 'Returns detailed information about current shifts, active shifts, cached vs fresh doctor assignments'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Debug information retrieved successfully' 
+  })
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  async getDebugInfo() {
+    return await this.doctorShiftService.getShiftDebugInfo();
+  }
+
+  @Post('force-refresh')
+  @ApiOperation({ 
+    summary: 'Force refresh current doctor assignment',
+    description: 'Bypasses cache and forces real-time lookup of current doctor assignment'
+  })
+  @ApiResponse({ 
+    status: HttpStatus.OK, 
+    description: 'Current doctor assignment refreshed successfully' 
+  })
+  @Roles(UserRole.SUPER_ADMIN, UserRole.ADMIN)
+  async forceRefreshCurrentDoctor() {
+    return await this.doctorShiftService.forceRefreshCurrentDoctor();
+  }
+
   @Get('health')
   @ApiOperation({ 
     summary: 'Health check for doctor shift service'

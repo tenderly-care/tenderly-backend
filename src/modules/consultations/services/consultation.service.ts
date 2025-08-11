@@ -29,7 +29,7 @@ import {
   AIAgentSymptomCollectionDto,
   AIDiagnosisResponseDto,
   GynecologicalAssessmentDto,
-  StructuredDiagnosisResponseDto
+  AIStructuredDiagnosisResponseDto
 } from '../dto/consultation.dto';
 import { CacheService } from '../../../core/cache/cache.service';
 import { AuditService } from '../../../security/audit/audit.service';
@@ -269,7 +269,7 @@ export class ConsultationService {
     assessmentData: GynecologicalAssessmentDto,
     clinicalSessionId: string,
     requestMetadata?: { ipAddress: string; userAgent: string }
-  ): Promise<StructuredDiagnosisResponseDto & { consultationId: string; clinicalSessionId: string; consultationPricing: any; paymentVerified: boolean }> {
+  ): Promise<AIStructuredDiagnosisResponseDto & { consultationId: string; clinicalSessionId: string; consultationPricing: any; paymentVerified: boolean }> {
     try {
       this.logger.log(`Collecting structured gynecological assessment for patient: ${patientId}`);
       

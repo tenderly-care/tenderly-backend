@@ -355,10 +355,9 @@ export class Consultation {
 export const ConsultationSchema = SchemaFactory.createForClass(Consultation);
 
 // Indexes for performance
+// Note: consultationId uniqueness is handled by the @Prop({ unique: true }) decorator
 ConsultationSchema.index({ patientId: 1, status: 1 });
-ConsultationSchema.index({ consultationId: 1 }, { unique: true });
 ConsultationSchema.index({ doctorId: 1, status: 1 });
 ConsultationSchema.index({ doctorId: 1, prescriptionStatus: 1 }); // For prescription workflow queries
-ConsultationSchema.index({ prescriptionStatus: 1 }); // For prescription status filtering
 ConsultationSchema.index({ createdAt: -1 });
 ConsultationSchema.index({ updatedAt: -1 });
