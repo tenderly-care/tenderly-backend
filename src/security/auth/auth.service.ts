@@ -882,7 +882,7 @@ export class AuthService {
       const pattern = `${keyPrefix}session:*`;
 
       // Get all session keys - we need to access the Redis client directly
-      const keys = await this.cacheService['client'].keys(pattern);
+      const keys = await this.cacheService['client']?.keys(pattern) || [];
 
       for (const key of keys) {
         // Remove the prefix and get the actual key to use with cacheService
@@ -934,7 +934,7 @@ export class AuthService {
       );
 
       // Get all session keys - we need to access the Redis client directly
-      const keys = await this.cacheService['client'].keys(pattern);
+      const keys = await this.cacheService['client']?.keys(pattern) || [];
       this.logger.debug(
         `Found ${keys.length} session keys: ${JSON.stringify(keys)}`,
       );

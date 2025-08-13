@@ -9,10 +9,10 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       useFactory: async (configService: ConfigService) => {
         const isProduction =
           configService.get<string>('app.env') === 'production';
-        const mongoUri = configService.get<string>('database.mongodb.uri');
+        const mongoUri = configService.get<string>('database.mongodb.uri') || 'mongodb://localhost:27017/tenderly';
         
         // Let the URI handle SSL configuration to avoid conflicts
-        const baseConfig = {
+        const baseConfig: any = {
           uri: mongoUri,
           // Connection pool optimization
           minPoolSize: isProduction ? 2 : 1,
