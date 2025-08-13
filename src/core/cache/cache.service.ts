@@ -9,9 +9,19 @@ export class CacheService {
   private isRedisAvailable: boolean = false;
 
   constructor(private configService: ConfigService) {
+    const redisHost = this.configService.get<string>('database.redis.host');
+    
+    // Skip Redis initialization if host is not configured or disabled
+    if (!redisHost || redisHost === 'disabled' || redisHost === '') {
+      this.logger.log('Redis disabled - running without cache');
+      this.client = null;
+      this.isRedisAvailable = false;
+      return;
+    }
+    
     try {
       const redisOptions: RedisOptions = {
-        host: this.configService.get<string>('database.redis.host'),
+        host: redisHost,
         port: this.configService.get<number>('database.redis.port'),
         password: this.configService.get<string>('database.redis.password'),
         db: this.configService.get<number>('database.redis.db'),
