@@ -28,20 +28,19 @@ export class CacheService {
         // Use Railway's REDIS_URL (preferred method)
         this.logger.log(`Connecting to Redis using URL: ${redisUrl.replace(/:([^:@]{2,})@/, ':***@')}`);
         redisOptions = {
-          // Parse the URL for connection
+          // Connection settings
           connectionName: 'tenderly-cache',
           keyPrefix: this.configService.get<string>('database.redis.keyPrefix'),
-          // Reduced timeouts for Railway
+          // Connection timeouts optimized for Railway
           maxRetriesPerRequest: 3,
           connectTimeout: 10000,
           lazyConnect: true,
           showFriendlyErrorStack: true,
-          // Auto-reconnect with backoff
+          // Auto-reconnect settings
           reconnectOnError: (err) => {
             const targetError = 'READONLY';
             return err.message.includes(targetError);
           },
-          retryDelayOnFailover: 100,
           // Production optimizations
           enableReadyCheck: true,
           maxLoadingRetryTime: 5000,
