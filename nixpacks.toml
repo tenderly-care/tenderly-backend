@@ -1,0 +1,10 @@
+[providers.node]
+
+[phases.install]
+cmd = "npm ci"
+
+[phases.build]
+cmd = "npm run build"
+
+[phases.start]
+cmd = "npm run start:prod"
