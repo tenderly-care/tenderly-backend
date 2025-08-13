@@ -2,6 +2,39 @@ import { ApiPropertyOptional } from '@nestjs/swagger';
 import { IsObject, IsString, IsOptional, IsArray, ValidateNested, IsNumber, IsEnum } from 'class-validator';
 import { Type } from 'class-transformer';
 
+// Detailed medication object structure
+class MedicationDto {
+  @ApiPropertyOptional({ description: 'Name of the medication' })
+  @IsOptional()
+  @IsString()
+  name?: string;
+
+  @ApiPropertyOptional({ description: 'Dosage of the medication (e.g., "500mg", "1 tablet")' })
+  @IsOptional()
+  @IsString()
+  dosage?: string;
+
+  @ApiPropertyOptional({ description: 'Frequency of administration (e.g., "twice daily", "every 8 hours")' })
+  @IsOptional()
+  @IsString()
+  frequency?: string;
+
+  @ApiPropertyOptional({ description: 'Duration of treatment (e.g., "7 days", "2 weeks")' })
+  @IsOptional()
+  @IsString()
+  duration?: string;
+
+  @ApiPropertyOptional({ description: 'Reason for prescribing this medication' })
+  @IsOptional()
+  @IsString()
+  reason?: string;
+
+  @ApiPropertyOptional({ description: 'Additional notes, warnings, or instructions' })
+  @IsOptional()
+  @IsString()
+  notes?: string;
+}
+
 // Simple structure for recommended investigations
 class RecommendedInvestigationDto {
   @ApiPropertyOptional({ description: 'Name of the investigation test' })
@@ -26,11 +59,25 @@ class TreatmentRecommendationsDto {
   @IsString()
   primary_treatment?: string;
 
-  @ApiPropertyOptional({ type: [String], description: 'List of safe medications' })
+  @ApiPropertyOptional({ 
+    type: [MedicationDto], 
+    description: 'List of safe medications with detailed information',
+    example: [
+      {
+        name: 'Paracetamol',
+        dosage: '500mg',
+        frequency: 'twice daily',
+        duration: '7 days',
+        reason: 'Pain relief and fever reduction',
+        notes: 'Take after meals to avoid stomach irritation'
+      }
+    ]
+  })
   @IsOptional()
   @IsArray()
-  @IsString({ each: true })
-  safe_medications?: string[];
+  @ValidateNested({ each: true })
+  @Type(() => MedicationDto)
+  safe_medications?: MedicationDto[];
 
   @ApiPropertyOptional({ type: [String], description: 'Lifestyle modification recommendations' })
   @IsOptional()
