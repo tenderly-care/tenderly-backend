@@ -9,15 +9,11 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
       useFactory: async (configService: ConfigService) => {
         const isProduction =
           configService.get<string>('app.env') === 'production';
-        return {
-          uri: configService.get<string>('database.mongodb.uri'),
-          // Production security options
-          ...(isProduction && {
-            ssl: true,
-            authSource: 'admin',
-            retryWrites: true,
-            w: 'majority',
-          }),
+        const mongoUri = configService.get<string>('database.mongodb.uri');
+        
+        // Let the URI handle SSL configuration to avoid conflicts
+        const baseConfig = {
+          uri: mongoUri,
           // Connection pool optimization
           minPoolSize: isProduction ? 2 : 1,
           maxPoolSize: isProduction ? 10 : 5,
@@ -26,6 +22,14 @@ import { ConfigModule, ConfigService } from '@nestjs/config';
           socketTimeoutMS: 45000,
           serverSelectionTimeoutMS: 5000,
         };
+        
+        // Only add SSL config if not already specified in URI
+        if (isProduction && !mongoUri.includes('ssl=') && !mongoUri.includes('mongodb+srv://')) {
+          baseConfig.ssl = false; // Railway managed MongoDB doesn't use SSL
+          baseConfig.authSource = 'admin';
+        }
+        
+        return baseConfig;
       },
       inject: [ConfigService],
     }),
