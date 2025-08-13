@@ -42,7 +42,7 @@ export class ConsultationBusinessService {
           $in: [
             ConsultationStatus.PAYMENT_CONFIRMED,
             ConsultationStatus.CLINICAL_ASSESSMENT_PENDING,
-            ConsultationStatus.CLINICAL_ASSESSMENT_COMPLETE,
+            ConsultationStatus.ACTIVE,
             ConsultationStatus.DOCTOR_REVIEW_PENDING,
             ConsultationStatus.DOCTOR_ASSIGNED,
             ConsultationStatus.IN_PROGRESS,
@@ -85,7 +85,7 @@ export class ConsultationBusinessService {
           $in: [
             ConsultationStatus.PAYMENT_CONFIRMED,
             ConsultationStatus.CLINICAL_ASSESSMENT_PENDING,
-            ConsultationStatus.CLINICAL_ASSESSMENT_COMPLETE,
+            ConsultationStatus.ACTIVE,
             ConsultationStatus.DOCTOR_REVIEW_PENDING,
             ConsultationStatus.DOCTOR_ASSIGNED,
             ConsultationStatus.IN_PROGRESS,
@@ -280,15 +280,15 @@ export class ConsultationBusinessService {
       ],
       [ConsultationStatus.PAYMENT_CONFIRMED]: [
         ConsultationStatus.CLINICAL_ASSESSMENT_PENDING,
-        ConsultationStatus.CLINICAL_ASSESSMENT_COMPLETE,
+        ConsultationStatus.ACTIVE,
         ConsultationStatus.CANCELLED
       ],
       [ConsultationStatus.CLINICAL_ASSESSMENT_PENDING]: [
-        ConsultationStatus.CLINICAL_ASSESSMENT_COMPLETE,
+        ConsultationStatus.ACTIVE,
         ConsultationStatus.DOCTOR_REVIEW_PENDING,
         ConsultationStatus.CANCELLED
       ],
-      [ConsultationStatus.CLINICAL_ASSESSMENT_COMPLETE]: [
+      [ConsultationStatus.ACTIVE]: [
         ConsultationStatus.DOCTOR_REVIEW_PENDING,
         ConsultationStatus.DOCTOR_ASSIGNED,
         ConsultationStatus.COMPLETED,

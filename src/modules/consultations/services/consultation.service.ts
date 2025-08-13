@@ -316,10 +316,10 @@ export class ConsultationService {
       // 6. Update consultation with input/output, status, and statusHistory
       consultation.structuredAssessmentInput = assessmentData;
       consultation.aiAgentOutput = structuredDiagnosis;
-      consultation.status = ConsultationStatus.CLINICAL_ASSESSMENT_COMPLETE;
+      consultation.status = ConsultationStatus.ACTIVE;
       consultation.statusHistory = consultation.statusHistory || [];
       consultation.statusHistory.push({
-        status: ConsultationStatus.CLINICAL_ASSESSMENT_COMPLETE,
+        status: ConsultationStatus.ACTIVE,
         changedAt: new Date(),
         changedBy: new Types.ObjectId(patientId),
         reason: 'Structured assessment completed'
