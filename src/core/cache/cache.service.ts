@@ -9,10 +9,12 @@ export class CacheService {
   private isRedisAvailable: boolean = false;
 
   constructor(private configService: ConfigService) {
+    // Check for Railway-style REDIS_URL first
+    const redisUrl = this.configService.get<string>('database.redis.url');
     const redisHost = this.configService.get<string>('database.redis.host');
     
-    // Skip Redis initialization if host is not configured or disabled
-    if (!redisHost || redisHost === 'disabled' || redisHost === '') {
+    // Skip Redis initialization if no connection info is available
+    if (!redisUrl && (!redisHost || redisHost === 'disabled' || redisHost === '')) {
       this.logger.log('Redis disabled - running without cache');
       this.client = null;
       this.isRedisAvailable = false;
@@ -20,27 +22,60 @@ export class CacheService {
     }
     
     try {
-      const redisOptions: RedisOptions = {
-        host: redisHost,
-        port: this.configService.get<number>('database.redis.port'),
-        password: this.configService.get<string>('database.redis.password'),
-        db: this.configService.get<number>('database.redis.db'),
-        keyPrefix: this.configService.get<string>('database.redis.keyPrefix'),
-        // Reduce timeouts and retries to fail faster
-        maxRetriesPerRequest: 1,
-        connectTimeout: 5000,
-        maxLoadingRetryTime: 3000,
-        lazyConnect: true, // Don't connect immediately
-        showFriendlyErrorStack: false, // Reduce noise
-        reconnectOnError: () => false, // Don't auto-reconnect on errors
-        // Enable TLS for secure connections in production
-        tls:
-          this.configService.get<string>('app.env') === 'production'
-            ? { rejectUnauthorized: false }
-            : undefined,
-      };
-
-      this.client = new Redis(redisOptions);
+      let redisOptions: RedisOptions;
+      
+      if (redisUrl) {
+        // Use Railway's REDIS_URL (preferred method)
+        this.logger.log(`Connecting to Redis using URL: ${redisUrl.replace(/:([^:@]{2,})@/, ':***@')}`);
+        redisOptions = {
+          // Parse the URL for connection
+          connectionName: 'tenderly-cache',
+          keyPrefix: this.configService.get<string>('database.redis.keyPrefix'),
+          // Reduced timeouts for Railway
+          maxRetriesPerRequest: 3,
+          connectTimeout: 10000,
+          lazyConnect: true,
+          showFriendlyErrorStack: true,
+          // Auto-reconnect with backoff
+          reconnectOnError: (err) => {
+            const targetError = 'READONLY';
+            return err.message.includes(targetError);
+          },
+          retryDelayOnFailover: 100,
+          // Production optimizations
+          enableReadyCheck: true,
+          maxLoadingRetryTime: 5000,
+        };
+        
+        // Create Redis client with URL
+        this.client = new Redis(redisUrl, redisOptions);
+      } else {
+        // Fallback to individual parameters
+        this.logger.log(`Connecting to Redis at ${redisHost}:${this.configService.get<number>('database.redis.port')}`);
+        redisOptions = {
+          host: redisHost,
+          port: this.configService.get<number>('database.redis.port'),
+          password: this.configService.get<string>('database.redis.password'),
+          db: this.configService.get<number>('database.redis.db'),
+          keyPrefix: this.configService.get<string>('database.redis.keyPrefix'),
+          // Connection settings
+          maxRetriesPerRequest: 3,
+          connectTimeout: 10000,
+          lazyConnect: true,
+          showFriendlyErrorStack: true,
+          reconnectOnError: (err) => {
+            const targetError = 'READONLY';
+            return err.message.includes(targetError);
+          },
+          // TLS for production
+          tls:
+            this.configService.get<string>('app.env') === 'production'
+              ? { rejectUnauthorized: false }
+              : undefined,
+        };
+        
+        this.client = new Redis(redisOptions);
+      }
 
       this.client.on('connect', () => {
         this.logger.log('Redis connected successfully');
