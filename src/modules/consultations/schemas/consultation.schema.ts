@@ -19,7 +19,6 @@ export enum ConsultationStatus {
   PAYMENT_PENDING = 'payment_pending',       // Payment not yet completed
   PAYMENT_CONFIRMED = 'payment_confirmed',   // Payment completed successfully
   CLINICAL_ASSESSMENT_PENDING = 'clinical_assessment_pending',  // Awaiting clinical assessment
-  CLINICAL_ASSESSMENT_COMPLETE = 'clinical_assessment_complete', // Clinical assessment done
   DOCTOR_REVIEW_PENDING = 'doctor_review_pending',  // Awaiting doctor review
   DOCTOR_ASSIGNED = 'doctor_assigned',       // Doctor has been assigned
   ON_HOLD = 'on_hold'                       // Consultation temporarily on hold
