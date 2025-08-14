@@ -83,3 +83,8 @@ Thumbs.db
 # Upload directories
 /uploads/
 uploads/
+/Documents/
+Documents/
+
+# MongoDB sync and log files
+mongo_sync/
