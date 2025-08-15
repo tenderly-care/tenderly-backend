@@ -7,12 +7,15 @@ import {
   Body, 
   UseGuards, 
   Req, 
+  Res, 
+  Query, 
   HttpCode, 
   HttpStatus, 
   NotFoundException, 
   BadRequestException, 
   ForbiddenException 
 } from '@nestjs/common';
+import { Response } from 'express';
 import { 
   ApiTags, 
   ApiOperation, 
@@ -196,6 +199,53 @@ export class PrescriptionController {
     @GetUser() user: UserDocument,
   ): Promise<PrescriptionHistoryDto[]> {
     return this.prescriptionService.getPrescriptionHistory(consultationId, user);
+  }
+
+  @Get('pdf/preview')
+  @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.SUPER_DOC)
+  @ApiOperation({ summary: 'Stream prescription draft PDF for preview' })
+  @ApiResponse({
+    status: 200,
+    description: 'PDF streamed successfully',
+    content: {
+      'application/pdf': {
+        schema: {
+          type: 'string',
+          format: 'binary'
+        }
+      }
+    }
+  })
+  async streamDraftPdf(
+    @Param('id') consultationId: string,
+    @GetUser() user: UserDocument,
+    @Res() res: Response,
+  ): Promise<void> {
+    return this.prescriptionService.streamDraftPdf(consultationId, user, res);
+  }
+
+  @Get('pdf/download')
+  @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.SUPER_DOC)
+  @ApiOperation({ summary: 'Download signed prescription PDF' })
+  @ApiResponse({
+    status: 200,
+    description: 'Signed PDF downloaded successfully',
+    content: {
+      'application/pdf': {
+        schema: {
+          type: 'string',
+          format: 'binary'
+        }
+      }
+    }
+  })
+  async downloadSignedPdf(
+    @Param('id') consultationId: string,
+    @GetUser() user: UserDocument,
+    @Query('attachment') attachment: string = 'true',
+    @Res() res: Response,
+  ): Promise<void> {
+    return this.prescriptionService.downloadSignedPdf(consultationId, user, res, attachment === 'true');
   }
 
   @Post('complete-consultation')

@@ -6,6 +6,7 @@ import {
   ForbiddenException, 
   InternalServerErrorException 
 } from '@nestjs/common';
+import { Response } from 'express';
 import { InjectModel } from '@nestjs/mongoose';
 import { Model, Types } from 'mongoose';
 import { ConfigService } from '@nestjs/config';
@@ -466,83 +467,164 @@ export class PrescriptionService {
     // Re-authenticate user for security
     await this.reAuthenticateUser(user, signAndSendDto.password, signAndSendDto.mfaCode);
 
+    let uploadResult: any;
+    let digitalSignature: any;
+    let pdfHash: string;
+
     try {
+      this.logger.log(`Starting prescription signing process for consultation ${consultationId}`);
+      
       // Generate final HTML content (without watermark)
       const htmlContent = this.generatePrescriptionHTML(consultation, user, false);
+      this.logger.log(`HTML content generated for signing consultation ${consultationId}`);
       
       // Generate final PDF
       const pdfBuffer = await this.pdfGenerationService.generatePdf(htmlContent, false);
+      this.logger.log(`PDF buffer generated for signing consultation ${consultationId}, size: ${pdfBuffer.length} bytes`);
       
       // Create digital signature
       const prescriptionData = JSON.stringify(consultation.prescriptionData);
-      const digitalSignature = await this.digitalSignatureService.signData(prescriptionData);
+      digitalSignature = await this.digitalSignatureService.signData(prescriptionData);
+      this.logger.log(`Digital signature created for consultation ${consultationId}`);
       
       // Generate PDF hash for integrity
-      const pdfHash = this.digitalSignatureService.generatePdfHash(pdfBuffer);
+      pdfHash = this.digitalSignatureService.generatePdfHash(pdfBuffer);
+      this.logger.log(`PDF hash generated for consultation ${consultationId}: ${pdfHash}`);
       
       // Upload signed PDF
-      const uploadResult = await this.fileStorageService.uploadPdf(
+      uploadResult = await this.fileStorageService.uploadPdf(
         pdfBuffer,
         `prescription-signed-${consultation.consultationId}.pdf`,
         false,
       );
+      this.logger.log(`PDF uploaded successfully for consultation ${consultationId} to: ${uploadResult.url}`);
 
-      // Update consultation with signature and final PDF
-      consultation.prescriptionData.digitalSignature = {
-        signature: digitalSignature.signature,
-        algorithm: digitalSignature.algorithm,
-        certificateId: digitalSignature.certificateId,
-        signedAt: digitalSignature.signedAt,
-        ipAddress: metadata.ipAddress,
-        userAgent: metadata.userAgent,
-      };
-      consultation.prescriptionData.signedPdfUrl = uploadResult.url;
-      consultation.prescriptionData.pdfHash = pdfHash;
-      consultation.prescriptionStatus = PrescriptionStatus.SIGNED;
-      
-      // Add to prescription history
-      this.addToPrescriptionHistory(
-        consultation,
-        PrescriptionAction.SIGNATURE_APPLIED,
-        user._id as Types.ObjectId,
-        'Prescription digitally signed by doctor',
-        metadata,
-      );
-
-      await consultation.save();
-
-      // TODO: Send notification to patient
-      // await this.notificationService.notifyPatientPrescriptionReady(consultation);
-
-      // Update status to SENT
-      consultation.prescriptionStatus = PrescriptionStatus.SENT;
-      this.addToPrescriptionHistory(
-        consultation,
-        PrescriptionAction.SENT_TO_PATIENT,
-        user._id as Types.ObjectId,
-        'Prescription sent to patient',
-        metadata,
-      );
-      
-      await consultation.save();
-
-      this.logger.log(`Prescription signed and sent for consultation ${consultationId}`);
-
-      return {
-        signedPdfUrl: uploadResult.url,
-        pdfHash,
-        prescriptionStatus: consultation.prescriptionStatus,
-        digitalSignature: {
-          algorithm: digitalSignature.algorithm,
-          signedAt: digitalSignature.signedAt,
-          certificateId: digitalSignature.certificateId,
-        },
-        message: 'Prescription signed and sent successfully',
-      };
-    } catch (error) {
-      this.logger.error(`Failed to sign and send prescription for consultation ${consultationId}:`, error);
-      throw new InternalServerErrorException('Failed to sign and send prescription');
+    } catch (processingError) {
+      this.logger.error(`Failed to process prescription for consultation ${consultationId}:`, processingError.message);
+      throw new InternalServerErrorException(`PDF generation and upload failed: ${processingError.message}`);
     }
+
+    // PRODUCTION FIX: Use atomic database operation with retry logic
+    const maxRetries = 3;
+    let attempt = 0;
+    let saveSuccess = false;
+    
+    while (attempt < maxRetries && !saveSuccess) {
+      attempt++;
+      this.logger.log(`Database save attempt ${attempt}/${maxRetries} for consultation ${consultationId}`);
+      
+      try {
+        // Use atomic findByIdAndUpdate to prevent data loss
+        const updateResult = await this.consultationModel.findByIdAndUpdate(
+          consultationId,
+          {
+            $set: {
+              prescriptionStatus: PrescriptionStatus.SENT,
+              'prescriptionData.digitalSignature': {
+                signature: digitalSignature.signature,
+                algorithm: digitalSignature.algorithm,
+                certificateId: digitalSignature.certificateId,
+                signedAt: digitalSignature.signedAt,
+                ipAddress: metadata.ipAddress,
+                userAgent: metadata.userAgent,
+              },
+              'prescriptionData.signedPdfUrl': uploadResult.url,
+              'prescriptionData.pdfHash': pdfHash,
+            },
+            $push: {
+              prescriptionHistory: {
+                $each: [
+                  {
+                    action: PrescriptionAction.SIGNATURE_APPLIED,
+                    timestamp: new Date(),
+                    performedBy: user._id as Types.ObjectId,
+                    details: 'Prescription digitally signed by doctor',
+                    ipAddress: metadata.ipAddress,
+                    userAgent: metadata.userAgent,
+                  },
+                  {
+                    action: PrescriptionAction.SENT_TO_PATIENT,
+                    timestamp: new Date(),
+                    performedBy: user._id as Types.ObjectId,
+                    details: 'Prescription sent to patient',
+                    ipAddress: metadata.ipAddress,
+                    userAgent: metadata.userAgent,
+                  }
+                ]
+              }
+            }
+          },
+          {
+            new: true,
+            runValidators: true,
+            // Ensure we get the latest version to avoid conflicts
+            upsert: false
+          }
+        );
+
+        if (!updateResult) {
+          throw new Error('Consultation not found during update');
+        }
+
+        // Verify the critical data was saved correctly
+        if (!updateResult.prescriptionData?.signedPdfUrl) {
+          throw new Error('signedPdfUrl was not saved correctly');
+        }
+
+        if (!updateResult.prescriptionData?.pdfHash) {
+          throw new Error('pdfHash was not saved correctly');
+        }
+
+        if (updateResult.prescriptionStatus !== PrescriptionStatus.SENT) {
+          throw new Error('prescriptionStatus was not updated correctly');
+        }
+
+        this.logger.log(`PRODUCTION SUCCESS: Prescription signed and saved for consultation ${consultationId}`);
+        this.logger.log(`- Status: ${updateResult.prescriptionStatus}`);
+        this.logger.log(`- SignedPdfUrl: ${updateResult.prescriptionData.signedPdfUrl}`);
+        this.logger.log(`- PdfHash: ${updateResult.prescriptionData.pdfHash}`);
+        this.logger.log(`- DigitalSignature: ${!!updateResult.prescriptionData.digitalSignature}`);
+        
+        saveSuccess = true;
+        
+      } catch (saveError) {
+        this.logger.error(`Database save attempt ${attempt} failed for consultation ${consultationId}:`, saveError.message);
+        
+        if (attempt === maxRetries) {
+          // If all attempts failed, clean up the uploaded file
+          try {
+            await this.fileStorageService.deleteFile(uploadResult.key);
+            this.logger.log(`Cleaned up uploaded file: ${uploadResult.key}`);
+          } catch (cleanupError) {
+            this.logger.error(`Failed to cleanup uploaded file: ${cleanupError.message}`);
+          }
+          
+          throw new InternalServerErrorException(
+            `Failed to save prescription data after ${maxRetries} attempts. Please try again or contact support.`
+          );
+        }
+        
+        // Wait before retry (exponential backoff)
+        await new Promise(resolve => setTimeout(resolve, attempt * 1000));
+      }
+    }
+
+    // TODO: Send notification to patient
+    // await this.notificationService.notifyPatientPrescriptionReady(consultation);
+
+    this.logger.log(`PRODUCTION COMPLETE: Prescription signing workflow completed for consultation ${consultationId}`);
+
+    return {
+      signedPdfUrl: uploadResult.url,
+      pdfHash,
+      prescriptionStatus: PrescriptionStatus.SENT,
+      digitalSignature: {
+        algorithm: digitalSignature.algorithm,
+        signedAt: digitalSignature.signedAt,
+        certificateId: digitalSignature.certificateId,
+      },
+      message: 'Prescription signed and sent successfully',
+    };
   }
 
   async getPrescriptionHistory(
@@ -592,7 +674,109 @@ export class PrescriptionService {
     isDraft: boolean,
   ): string {
     const prescriptionData = consultation.prescriptionData;
+    const doctorDiagnosis = consultation.doctorDiagnosis;
     const watermarkClass = isDraft ? 'draft-watermark' : '';
+
+    // Production-level data extraction and formatting
+    const formatPossibleDiagnoses = (): string => {
+      if (!doctorDiagnosis?.possible_diagnoses) return 'Not specified';
+      
+      if (Array.isArray(doctorDiagnosis.possible_diagnoses)) {
+        return doctorDiagnosis.possible_diagnoses
+          .map((diagnosis: any) => {
+            if (typeof diagnosis === 'string') {
+              return diagnosis;
+            } else if (diagnosis && typeof diagnosis === 'object') {
+              const name = diagnosis.name || diagnosis.condition || '';
+              const description = diagnosis.description || diagnosis.details || '';
+              return name + (description ? ` - ${description}` : '');
+            }
+            return String(diagnosis);
+          })
+          .filter(Boolean)
+          .join(', ');
+      } else if (typeof doctorDiagnosis.possible_diagnoses === 'string') {
+        return doctorDiagnosis.possible_diagnoses;
+      }
+      
+      return 'Not specified';
+    };
+
+    const formatMedications = (): string => {
+      if (!prescriptionData?.medications || !Array.isArray(prescriptionData.medications) || prescriptionData.medications.length === 0) {
+        return '<p>No medications prescribed</p>';
+      }
+
+      return prescriptionData.medications
+        .map((medication: any) => {
+          const name = String(medication?.name || 'Unknown Medication');
+          const dosage = String(medication?.dosage || 'As per doctor recommendation');
+          const frequency = String(medication?.frequency || 'As per doctor recommendation');
+          const duration = String(medication?.duration || 'As per doctor recommendation');
+          const instructions = String(medication?.instructions || 'As per doctor recommendation');
+
+          return `
+            <div class="medication">
+              <p><strong>${name}</strong>${dosage !== 'As per doctor recommendation' ? ' - ' + dosage : ''}</p>
+              <p>Frequency: ${frequency}</p>
+              <p>Duration: ${duration}</p>
+              <p>Instructions: ${instructions}</p>
+            </div>
+          `;
+        })
+        .join('');
+    };
+
+    const formatInvestigations = (): string => {
+      if (!prescriptionData?.investigations || !Array.isArray(prescriptionData.investigations) || prescriptionData.investigations.length === 0) {
+        return '<p>No specific investigations recommended</p>';
+      }
+
+      return prescriptionData.investigations
+        .map((investigation: any) => {
+          const name = String(investigation?.name || 'Investigation');
+          const instructions = String(investigation?.instructions || 'As recommended by doctor');
+          
+          return `
+            <div class="investigation-test">
+              <p><strong>${name}</strong></p>
+              <p>Instructions: ${instructions}</p>
+            </div>
+          `;
+        })
+        .join('');
+    };
+
+    const formatArrayToList = (items: any[], fallback: string = 'None specified'): string => {
+      if (!Array.isArray(items) || items.length === 0) {
+        return `<li>${fallback}</li>`;
+      }
+      
+      return items
+        .map(item => `<li>${String(item)}</li>`)
+        .join('');
+    };
+
+    const formatTreatmentRecommendations = () => {
+      const treatmentRecs = doctorDiagnosis?.treatment_recommendations;
+      if (!treatmentRecs) {
+        return {
+          primaryTreatment: 'Not specified',
+          lifestyleModifications: '<li>None specified</li>',
+          dietaryAdvice: '<li>None specified</li>',
+          followUpTimeline: 'Not specified'
+        };
+      }
+
+      return {
+        primaryTreatment: String(treatmentRecs.primary_treatment || 'Not specified'),
+        lifestyleModifications: formatArrayToList(treatmentRecs.lifestyle_modifications),
+        dietaryAdvice: formatArrayToList(treatmentRecs.dietary_advice),
+        followUpTimeline: String(treatmentRecs.follow_up_timeline || 'Not specified')
+      };
+    };
+
+    const treatment = formatTreatmentRecommendations();
 
     return `
       <!DOCTYPE html>
@@ -618,117 +802,66 @@ export class PrescriptionService {
         </div>
         
         <div class="doctor-info">
-          <p><strong>Doctor:</strong> ${doctor.firstName} ${doctor.lastName}</p>
+          <p><strong>Doctor:</strong> ${String(doctor.firstName)} ${String(doctor.lastName)}</p>
           <p><strong>Date:</strong> ${new Date().toLocaleDateString()}</p>
-          <p><strong>Consultation ID:</strong> ${consultation._id}</p>
+          <p><strong>Consultation ID:</strong> ${String(consultation._id)}</p>
         </div>
 
         <div class="diagnosis">
           <h3>Diagnosis</h3>
-          <p><strong>Possible Diagnoses:</strong> ${
-            Array.isArray(consultation.doctorDiagnosis?.possible_diagnoses)
-              ? consultation.doctorDiagnosis.possible_diagnoses
-                  .map((d: any) => {
-                    // Handle both string and object formats
-                    if (typeof d === 'string') {
-                      return d;
-                    } else if (d && typeof d === 'object' && 'name' in d) {
-                      return `${d.name}${d.description ? ' - ' + d.description : ''}`;
-                    }
-                    return '';
-                  })
-                  .filter(Boolean)
-                  .join(', ') || 'Not specified'
-              : 'Not specified'
-          }</p>
-          <p><strong>Clinical Reasoning:</strong> ${consultation.doctorDiagnosis?.clinical_reasoning || 'Not specified'}</p>
-          <p><strong>Confidence Score:</strong> ${consultation.doctorDiagnosis?.confidence_score || 'Not specified'}</p>
-          ${consultation.doctorDiagnosis?.processing_notes ? `<p><strong>Processing Notes:</strong> ${consultation.doctorDiagnosis.processing_notes}</p>` : ''}
+          <p><strong>Possible Diagnoses:</strong> ${formatPossibleDiagnoses()}</p>
+          <p><strong>Clinical Reasoning:</strong> ${String(doctorDiagnosis?.clinical_reasoning || 'Not specified')}</p>
+          <p><strong>Confidence Score:</strong> ${String(doctorDiagnosis?.confidence_score || 'Not specified')}</p>
+          ${doctorDiagnosis?.processing_notes ? `<p><strong>Processing Notes:</strong> ${String(doctorDiagnosis.processing_notes)}</p>` : ''}
         </div>
 
         <div class="medications">
           <h3>Medications</h3>
-          ${
-            // PRODUCTION FIX: Use normalized prescriptionData.medications instead of raw doctorDiagnosis data
-            Array.isArray(prescriptionData?.medications) && prescriptionData.medications.length > 0
-              ? prescriptionData.medications.map((medication: any) => {
-                  // Use the already normalized medication data from savePrescriptionDraft
-                  const name = medication?.name || 'Unknown Medication';
-                  const dosage = medication?.dosage || 'As per doctor recommendation';
-                  const frequency = medication?.frequency || 'As per doctor recommendation';
-                  const duration = medication?.duration || 'As per doctor recommendation';
-                  const instructions = medication?.instructions || 'As per doctor recommendation';
-
-                  return `
-                    <div class="medication">
-                      <p><strong>${name}</strong>${dosage !== 'As per doctor recommendation' ? ' - ' + dosage : ''}</p>
-                      <p>Frequency: ${frequency}</p>
-                      <p>Duration: ${duration}</p>
-                      <p>Instructions: ${instructions}</p>
-                    </div>
-                  `;
-                }).join('')
-              : '<p>No medications prescribed</p>'
-          }
+          ${formatMedications()}
         </div>
 
         <div class="investigations">
           <h3>Recommended Investigations</h3>
-          ${
-            // Use normalized prescriptionData.investigations instead of raw doctorDiagnosis data
-            Array.isArray(prescriptionData?.investigations) && prescriptionData.investigations.length > 0
-              ? prescriptionData.investigations.map((investigation: any) => {
-                  const name = investigation?.name || 'Investigation';
-                  const instructions = investigation?.instructions || 'As recommended by doctor';
-                  
-                  return `
-                    <div class="investigation-test">
-                      <p><strong>${name}</strong></p>
-                      <p>Instructions: ${instructions}</p>
-                    </div>
-                  `;
-                }).join('')
-              : '<p>No specific investigations recommended</p>'
-          }
+          ${formatInvestigations()}
         </div>
 
         <div class="treatment-plan">
           <h3>Treatment Recommendations</h3>
-          <p><strong>Primary Treatment:</strong> ${consultation.doctorDiagnosis?.treatment_recommendations?.primary_treatment || 'Not specified'}</p>
+          <p><strong>Primary Treatment:</strong> ${treatment.primaryTreatment}</p>
           <p><strong>Lifestyle Modifications:</strong></p>
           <ul>
-            ${consultation.doctorDiagnosis?.treatment_recommendations?.lifestyle_modifications && Array.isArray(consultation.doctorDiagnosis.treatment_recommendations.lifestyle_modifications) ? consultation.doctorDiagnosis.treatment_recommendations.lifestyle_modifications.map(mod => `<li>${mod}</li>`).join('') : '<li>None specified</li>'}
+            ${treatment.lifestyleModifications}
           </ul>
           <p><strong>Dietary Advice:</strong></p>
           <ul>
-            ${consultation.doctorDiagnosis?.treatment_recommendations?.dietary_advice && Array.isArray(consultation.doctorDiagnosis.treatment_recommendations.dietary_advice) ? consultation.doctorDiagnosis.treatment_recommendations.dietary_advice.map(advice => `<li>${advice}</li>`).join('') : '<li>None specified</li>'}
+            ${treatment.dietaryAdvice}
           </ul>
-          <p><strong>Follow-up Timeline:</strong> ${consultation.doctorDiagnosis?.treatment_recommendations?.follow_up_timeline || 'Not specified'}</p>
+          <p><strong>Follow-up Timeline:</strong> ${treatment.followUpTimeline}</p>
         </div>
 
         <div class="patient-education">
           <h3>Patient Education</h3>
           <ul>
-            ${consultation.doctorDiagnosis?.patient_education?.map(edu => `<li>${edu}</li>`).join('') || '<li>No specific education provided</li>'}
+            ${formatArrayToList(doctorDiagnosis?.patient_education, 'No specific education provided')}
           </ul>
         </div>
 
         <div class="warning-signs">
           <h3>Warning Signs</h3>
           <ul>
-            ${consultation.doctorDiagnosis?.warning_signs?.map(sign => `<li>${sign}</li>`).join('') || '<li>No specific warning signs provided</li>'}
+            ${formatArrayToList(doctorDiagnosis?.warning_signs, 'No specific warning signs provided')}
           </ul>
         </div>
 
         <div class="disclaimer">
-          <p><em>${consultation.doctorDiagnosis?.disclaimer || 'This prescription is based on the information provided and should be used as advised. Consult a healthcare professional for any concerns.'}</em></p>
+          <p><em>${String(doctorDiagnosis?.disclaimer || 'This prescription is based on the information provided and should be used as advised. Consult a healthcare professional for any concerns.')}</em></p>
         </div>
 
         <div class="signature">
           <p>_______________________</p>
-          <p>Dr. ${doctor.firstName} ${doctor.lastName}</p>
+          <p>Dr. ${String(doctor.firstName)} ${String(doctor.lastName)}</p>
           <p>Digital Signature Applied</p>
-          ${!isDraft && prescriptionData.digitalSignature ? `<p>Signed on: ${new Date(prescriptionData.digitalSignature.signedAt).toLocaleString()}</p>` : ''}
+          ${!isDraft && prescriptionData?.digitalSignature ? `<p>Signed on: ${new Date(prescriptionData.digitalSignature.signedAt).toLocaleString()}</p>` : ''}
         </div>
 
         <div class="footer">
@@ -944,5 +1077,145 @@ export class PrescriptionService {
     if (!updateResult) {
       throw new InternalServerErrorException('Failed to update consultation status');
     }
+  }
+
+  // HYBRID PDF APPROACH: Stream drafts, store signed PDFs
+  
+  /**
+   * Stream draft PDF directly to client without storing on server
+   * This saves server storage space and provides instant preview
+   */
+  async streamDraftPdf(
+    consultationId: string,
+    user: UserDocument,
+    res: Response,
+  ): Promise<void> {
+    const consultation = await this.findAndValidateConsultation(consultationId, user._id as Types.ObjectId);
+
+    if (!consultation.doctorDiagnosis || !consultation.prescriptionData) {
+      throw new BadRequestException('Prescription draft is incomplete. Please complete diagnosis and medications.');
+    }
+
+    try {
+      this.logger.log(`Streaming draft PDF for consultation ${consultationId}`);
+      
+      // Generate HTML content for draft PDF
+      const htmlContent = this.generatePrescriptionHTML(consultation, user, true);
+      
+      // Generate PDF buffer (no file saving)
+      const pdfBuffer = await this.pdfGenerationService.generatePdf(htmlContent, true);
+      
+      // Set response headers for PDF streaming
+      const filename = `prescription-draft-${consultation.consultationId}.pdf`;
+      
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': 'inline', // Show in browser for preview
+        'Content-Length': pdfBuffer.length.toString(),
+        'Cache-Control': 'no-cache, no-store, must-revalidate', // Prevent caching of drafts
+        'Pragma': 'no-cache',
+        'Expires': '0',
+        'X-PDF-Type': 'draft'
+      });
+      
+      // Stream PDF directly to client
+      res.end(pdfBuffer);
+      
+      this.logger.log(`Draft PDF streamed successfully for consultation ${consultationId}`);
+      
+    } catch (error) {
+      this.logger.error(`Failed to stream draft PDF for consultation ${consultationId}:`, error.message);
+      res.status(500).json({ 
+        error: 'Failed to generate draft PDF', 
+        message: 'Please try again or contact support if the issue persists.' 
+      });
+    }
+  }
+
+  /**
+   * Download signed PDF from storage
+   * Signed PDFs are permanently stored for compliance and patient access
+   */
+  async downloadSignedPdf(
+    consultationId: string,
+    user: UserDocument,
+    res: Response,
+    asAttachment: boolean = true,
+  ): Promise<void> {
+    const consultation = await this.findAndValidateConsultation(consultationId, user._id as Types.ObjectId);
+
+    // Debug logging to understand the data state
+    this.logger.log(`Debug - Consultation prescriptionStatus: ${consultation.prescriptionStatus}`);
+    this.logger.log(`Debug - prescriptionData exists: ${!!consultation.prescriptionData}`);
+    this.logger.log(`Debug - signedPdfUrl: ${consultation.prescriptionData?.signedPdfUrl}`);
+    this.logger.log(`Debug - pdfHash: ${consultation.prescriptionData?.pdfHash}`);
+
+    if (consultation.prescriptionStatus !== PrescriptionStatus.SENT) {
+      throw new BadRequestException('Prescription has not been signed and sent yet.');
+    }
+
+    if (!consultation.prescriptionData?.signedPdfUrl) {
+      throw new NotFoundException('Signed prescription PDF not found. Please ensure the prescription has been signed.');
+    }
+
+    try {
+      this.logger.log(`Downloading signed PDF for consultation ${consultationId}`);
+      
+      // Fetch signed PDF from storage
+      const pdfBuffer = await this.fileStorageService.downloadPdf(consultation.prescriptionData.signedPdfUrl);
+      
+      // Set response headers for PDF download
+      const filename = `prescription-signed-${consultation.consultationId}.pdf`;
+      
+      res.set({
+        'Content-Type': 'application/pdf',
+        'Content-Disposition': asAttachment ? `attachment; filename="${filename}"` : 'inline',
+        'Content-Length': pdfBuffer.length.toString(),
+        'Cache-Control': 'public, max-age=3600', // Cache signed PDFs for 1 hour
+        'X-PDF-Type': 'signed',
+        'X-PDF-Hash': consultation.prescriptionData.pdfHash || 'unknown'
+      });
+      
+      // Stream PDF to client
+      res.end(pdfBuffer);
+      
+      this.logger.log(`Signed PDF downloaded successfully for consultation ${consultationId}`);
+      
+    } catch (error) {
+      this.logger.error(`Failed to download signed PDF for consultation ${consultationId}:`, error.message);
+      
+      if (error.message?.includes('not found') || error.message?.includes('404')) {
+        res.status(404).json({
+          error: 'Signed PDF not found',
+          message: 'The signed prescription PDF could not be located in storage.'
+        });
+      } else {
+        res.status(500).json({
+          error: 'Failed to download signed PDF',
+          message: 'Please try again or contact support if the issue persists.'
+        });
+      }
+    }
+  }
+
+  /**
+   * Get signed PDF URL for patient chat integration
+   * Returns the stored URL for signed PDFs to be shared in chat
+   */
+  async getSignedPdfUrl(consultationId: string, user: UserDocument): Promise<{ url: string; filename: string }> {
+    const consultation = await this.findAndValidateConsultation(consultationId, user._id as Types.ObjectId);
+
+    if (!consultation.prescriptionData?.signedPdfUrl) {
+      throw new NotFoundException('Signed prescription PDF not found.');
+    }
+
+    if (consultation.prescriptionStatus !== PrescriptionStatus.SENT) {
+      throw new BadRequestException('Prescription has not been signed and sent yet.');
+    }
+
+    return {
+      url: consultation.prescriptionData.signedPdfUrl,
+      filename: `prescription-signed-${consultation.consultationId}.pdf`
+    };
   }
 }

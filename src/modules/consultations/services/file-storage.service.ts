@@ -70,6 +70,24 @@ export class FileStorageService {
   }
 
   /**
+   * Download PDF file from storage
+   * Used for retrieving signed PDFs from storage
+   */
+  async downloadPdf(fileUrl: string): Promise<Buffer> {
+    try {
+      if (this.useLocalStorage) {
+        return await this.downloadFromLocal(fileUrl);
+      } else {
+        // In production, this would download from AWS S3
+        return await this.downloadFromS3(fileUrl);
+      }
+    } catch (error) {
+      this.logger.error('Failed to download PDF:', error);
+      throw new InternalServerErrorException('File download failed');
+    }
+  }
+
+  /**
    * Delete file from storage
    */
   async deleteFile(fileKey: string): Promise<void> {
@@ -170,6 +188,44 @@ export class FileStorageService {
     // await s3.deleteObject(params).promise();
     
     this.logger.log(`Would delete from S3: ${fileKey}`);
+  }
+
+  /**
+   * Download from local storage
+   */
+  private async downloadFromLocal(fileUrl: string): Promise<Buffer> {
+    // Extract the file path from URL (remove '/uploads/' prefix)
+    const relativePath = fileUrl.replace(/^\/uploads\//, '');
+    const filePath = path.join(this.localUploadPath, relativePath);
+    
+    if (!fs.existsSync(filePath)) {
+      throw new Error('File not found in local storage');
+    }
+    
+    const fileBuffer = fs.readFileSync(filePath);
+    this.logger.log(`Downloaded file from local storage: ${relativePath}`);
+    
+    return fileBuffer;
+  }
+
+  /**
+   * Download from AWS S3 (placeholder for production implementation)
+   */
+  private async downloadFromS3(fileUrl: string): Promise<Buffer> {
+    // In production, this would use AWS SDK:
+    // const s3 = new AWS.S3();
+    // const urlParts = new URL(fileUrl);
+    // const bucket = urlParts.hostname.split('.')[0];
+    // const key = urlParts.pathname.substring(1);
+    // const params = {
+    //   Bucket: bucket,
+    //   Key: key,
+    // };
+    // const result = await s3.getObject(params).promise();
+    // return result.Body as Buffer;
+    
+    this.logger.log(`Would download from S3: ${fileUrl}`);
+    throw new Error('S3 download not implemented in development mode');
   }
 
   /**

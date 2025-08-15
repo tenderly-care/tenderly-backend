@@ -248,77 +248,127 @@ export class PdfGenerationService {
   }
   
   private parseHtmlContent(htmlContent: string): PrescriptionData {
-    // Extract data from HTML using regex patterns
+    // PRODUCTION FIX: Safe string extraction with proper type handling
+    const safeString = (value: any): string => {
+      if (value === null || value === undefined) return 'Not specified';
+      if (typeof value === 'string') return value.trim();
+      if (typeof value === 'object') {
+        try {
+          return JSON.stringify(value);
+        } catch {
+          return 'Invalid data';
+        }
+      }
+      return String(value).trim();
+    };
+
     const extractText = (pattern: RegExp, defaultValue: string = 'Not specified'): string => {
-      const match = htmlContent.match(pattern);
-      return match ? match[1].replace(/\s+/g, ' ').trim() : defaultValue;
+      try {
+        const match = htmlContent.match(pattern);
+        const result = match ? match[1].replace(/\s+/g, ' ').trim() : defaultValue;
+        return safeString(result);
+      } catch (error) {
+        this.logger.warn(`Text extraction failed for pattern: ${pattern}`, error.message);
+        return safeString(defaultValue);
+      }
     };
     
     const extractList = (pattern: RegExp): string[] => {
-      const matches = htmlContent.match(pattern);
-      if (!matches) return [];
-      
-      const items = matches[0].match(/<li[^>]*>([^<]+)<\/li>/gi) || [];
-      return items.map(item => item.replace(/<[^>]*>/g, '').trim()).filter(Boolean);
+      try {
+        const matches = htmlContent.match(pattern);
+        if (!matches) return [];
+        
+        const items = matches[0].match(/<li[^>]*>([^<]+)<\/li>/gi) || [];
+        return items
+          .map(item => safeString(item.replace(/<[^>]*>/g, '')))
+          .filter(Boolean);
+      } catch (error) {
+        this.logger.warn(`List extraction failed for pattern: ${pattern}`, error.message);
+        return [];
+      }
     };
     
     return {
-      doctorName: extractText(/\<strong\>Doctor:\<\/strong\>\s*([^\<]+)/, 'Doctor Name').replace(/Dr\.\s*/, ''),
-      consultationId: extractText(/\<strong\>Consultation ID:\<\/strong\>\s*([^\<]+)/, 'N/A'),
-      date: new Date().toLocaleDateString(),
-      diagnosis: extractText(/\<strong\>Possible Diagnoses:\<\/strong\>\s*([^\<]+)/, 'Not specified'),
-      clinicalReasoning: extractText(/\<strong\>Clinical Reasoning:\<\/strong\>\s*([^\<]+)/, 'Not specified'),
-      confidenceScore: extractText(/\<strong\>Confidence Score:\<\/strong\>\s*([^\<]+)/, ''),
-      processingNotes: extractText(/\<strong\>Processing Notes:\<\/strong\>\s*([^\<]+)/, ''),
+      doctorName: safeString(extractText(/\<strong\>Doctor:\<\/strong\>\s*([^\<]+)/, 'Doctor Name').replace(/Dr\.\s*/, '')),
+      consultationId: safeString(extractText(/\<strong\>Consultation ID:\<\/strong\>\s*([^\<]+)/, 'N/A')),
+      date: safeString(new Date().toLocaleDateString()),
+      diagnosis: safeString(extractText(/\<strong\>Possible Diagnoses:\<\/strong\>\s*([^\<]+)/, 'Not specified')),
+      clinicalReasoning: safeString(extractText(/\<strong\>Clinical Reasoning:\<\/strong\>\s*([^\<]+)/, 'Not specified')),
+      confidenceScore: safeString(extractText(/\<strong\>Confidence Score:\<\/strong\>\s*([^\<]+)/, 'Not available')),
+      processingNotes: safeString(extractText(/\<strong\>Processing Notes:\<\/strong\>\s*([^\<]+)/, 'None')),
       medications: this.extractMedications(htmlContent),
       investigations: this.extractInvestigations(htmlContent),
       treatmentPlan: {
-        primaryTreatment: extractText(/\<strong\>Primary Treatment:\<\/strong\>\s*([^\<]+)/, 'Not specified'),
-        lifestyleModifications: extractList(/\<strong\>Lifestyle Modifications:\<\/strong\>[\s\S]*?\<ul[^\>]*\>([\s\S]*?)\<\/ul\>/i),
-        dietaryAdvice: extractList(/\<strong\>Dietary Advice:\<\/strong\>[\s\S]*?\<ul[^\>]*\>([\s\S]*?)\<\/ul\>/i),
-        followUpTimeline: extractText(/\<strong\>Follow-up Timeline:\<\/strong\>\s*([^\<]+)/, 'Not specified')
+        primaryTreatment: safeString(extractText(/\<strong\>Primary Treatment:\<\/strong\>\s*([^\<]+)/, 'Not specified')),
+        lifestyleModifications: extractList(/\<strong\>Lifestyle Modifications:\<\/strong\>[\s\S]*?\<ul[^\<>]*\>([\s\S]*?)\<\/ul\>/i),
+        dietaryAdvice: extractList(/\<strong\>Dietary Advice:\<\/strong\>[\s\S]*?\<ul[^\<>]*\>([\s\S]*?)\<\/ul\>/i),
+        followUpTimeline: safeString(extractText(/\<strong\>Follow-up Timeline:\<\/strong\>\s*([^\<]+)/, 'Not specified'))
       },
-      patientEducation: extractList(/\<h3\>Patient Education\<\/h3\>[\s\S]*?\<ul[^\>]*\>([\s\S]*?)\<\/ul\>/i),
-      warningSigns: extractList(/\<h3\>Warning Signs\<\/h3\>[\s\S]*?\<ul[^\>]*\>([\s\S]*?)\<\/ul\>/i),
-      disclaimer: extractText(/\<div class="disclaimer"\>\s*\<p\>\s*\<em\>([^\<]+)/, 'This prescription is based on the information provided and should be used as advised.')
+      patientEducation: extractList(/\<h3\>Patient Education\<\/h3\>[\s\S]*?\<ul[^\<>]*\>([\s\S]*?)\<\/ul\>/i),
+      warningSigns: extractList(/\<h3\>Warning Signs\<\/h3\>[\s\S]*?\<ul[^\<>]*\>([\s\S]*?)\<\/ul\>/i),
+      disclaimer: safeString(extractText(/\<div class="disclaimer"\>\s*\<p\>\s*\<em\>([^\<]+)/, 'This prescription is based on the information provided and should be used as advised.'))
     };
   }
   
   private extractMedications(htmlContent: string): any[] {
-    const medicationBlocks = htmlContent.match(/<div class="medication"[^>]*>([\s\S]*?)<\/div>/gi) || [];
-    
-    return medicationBlocks.map(block => {
-      const extractMedField = (field: string): string => {
-        const pattern = new RegExp(`<p>${field}:\s*([^<]+)</p>`, 'i');
-        const match = block.match(pattern);
-        return match ? match[1].trim() : 'As per doctor recommendation';
-      };
+    try {
+      const medicationBlocks = htmlContent.match(/\<div class="medication"[^\>]*\>([\s\S]*?)\<\/div\>/gi) || [];
       
-      const nameMatch = block.match(/<strong>([^<]+)<\/strong>/);
-      const name = nameMatch ? nameMatch[1].trim() : 'Unknown Medication';
-      
-      return {
-        name,
-        dosage: extractMedField('Dosage'),
-        frequency: extractMedField('Frequency'),
-        duration: extractMedField('Duration'),
-        instructions: extractMedField('Instructions')
-      };
-    });
+      return medicationBlocks.map(block => {
+        const safeString = (value: any): string => {
+          if (value === null || value === undefined) return 'As per doctor recommendation';
+          return String(value).trim();
+        };
+
+        const extractMedField = (field: string): string => {
+          try {
+            const pattern = new RegExp(`\<p\>${field}:\s*([^\<]+)\</p\>`, 'i');
+            const match = block.match(pattern);
+            return safeString(match ? match[1] : 'As per doctor recommendation');
+          } catch {
+            return 'As per doctor recommendation';
+          }
+        };
+        
+        const nameMatch = block.match(/\<strong\>([^\<]+)\<\/strong\>/);
+        const name = safeString(nameMatch ? nameMatch[1] : 'Unknown Medication');
+        
+        return {
+          name,
+          dosage: extractMedField('Dosage'),
+          frequency: extractMedField('Frequency'),
+          duration: extractMedField('Duration'),
+          instructions: extractMedField('Instructions')
+        };
+      });
+    } catch (error) {
+      this.logger.warn('Failed to extract medications from HTML', error.message);
+      return [];
+    }
   }
   
   private extractInvestigations(htmlContent: string): any[] {
-    const investigationBlocks = htmlContent.match(/\<div class="investigation-test"[^\>]*\>([\s\S]*?)\<\/div\>/gi) || [];
-    
-    return investigationBlocks.map(block => {
-      const nameMatch = block.match(/\<strong\>([^\<]+)\<\/strong\>/);
-      const instructionsMatch = block.match(/\<p\>Instructions:\s*([^\<]+)\<\/p\>/);
+    try {
+      const investigationBlocks = htmlContent.match(/\\<div class="investigation-test"[^\\>]*\\>([\s\S]*?)\\<\/div\>/gi) || [];
       
-      return {
-        name: nameMatch ? nameMatch[1].trim() : 'Investigation',
-        instructions: instructionsMatch ? instructionsMatch[1].trim() : 'As recommended by doctor'
-      };
-    });
+      return investigationBlocks.map(block => {
+        const safeString = (value: any): string => {
+          if (value === null || value === undefined) return 'As recommended by doctor';
+          return String(value).trim();
+        };
+
+        const nameMatch = block.match(/\\<strong\\>([^\\<]+)\\<\/strong\\>/);
+        const instructionsMatch = block.match(/\\<p\\>Instructions:\s*([^\\<]+)\\<\/p\\>/);
+        
+        return {
+          name: safeString(nameMatch ? nameMatch[1] : 'Investigation'),
+          instructions: safeString(instructionsMatch ? instructionsMatch[1] : 'As recommended by doctor')
+        };
+      });
+    } catch (error) {
+      this.logger.warn('Failed to extract investigations from HTML', error.message);
+      return [];
+    }
   }
 
   // Modern Design Methods
