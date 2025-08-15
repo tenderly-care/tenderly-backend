@@ -666,44 +666,22 @@ export class PrescriptionService {
         <div class="medications">
           <h3>Medications</h3>
           ${
-            // PRODUCTION FIX: Enhanced medication rendering with malformed data handling
-            Array.isArray(consultation.doctorDiagnosis?.treatment_recommendations?.safe_medications) && consultation.doctorDiagnosis.treatment_recommendations.safe_medications.length > 0
-              ? consultation.doctorDiagnosis.treatment_recommendations.safe_medications.map((safeMed: any) => {
-                  // Defensive programming - handle both current malformed data and future correct data
-                  let medicationName, dosage, frequency, duration, reason, notes;
-                  
-                  if (typeof safeMed === 'string') {
-                    medicationName = safeMed;
-                    dosage = frequency = duration = reason = notes = 'N/A';
-                  } else if (safeMed && typeof safeMed === 'object') {
-                    // Handle nested object structure (current malformed data)
-                    if (safeMed.name && typeof safeMed.name === 'object') {
-                      medicationName = safeMed.name.name || 'Unknown Medication';
-                      dosage = safeMed.name.dosage || safeMed.dosage || 'N/A';
-                      frequency = safeMed.name.frequency || safeMed.frequency || 'N/A';
-                      duration = safeMed.name.duration || safeMed.duration || 'N/A';
-                      reason = safeMed.name.reason || safeMed.reason || 'N/A';
-                      notes = safeMed.name.notes || safeMed.notes || 'N/A';
-                    } else {
-                      // Handle normal object structure
-                      medicationName = safeMed.name || 'Unknown Medication';
-                      dosage = safeMed.dosage || 'N/A';
-                      frequency = safeMed.frequency || 'N/A';
-                      duration = safeMed.duration || 'N/A';
-                      reason = safeMed.reason || 'N/A';
-                      notes = safeMed.notes || 'N/A';
-                    }
-                  } else {
-                    return ''; // Skip invalid entries
-                  }
+            // PRODUCTION FIX: Use normalized prescriptionData.medications instead of raw doctorDiagnosis data
+            Array.isArray(prescriptionData?.medications) && prescriptionData.medications.length > 0
+              ? prescriptionData.medications.map((medication: any) => {
+                  // Use the already normalized medication data from savePrescriptionDraft
+                  const name = medication?.name || 'Unknown Medication';
+                  const dosage = medication?.dosage || 'As per doctor recommendation';
+                  const frequency = medication?.frequency || 'As per doctor recommendation';
+                  const duration = medication?.duration || 'As per doctor recommendation';
+                  const instructions = medication?.instructions || 'As per doctor recommendation';
 
                   return `
                     <div class="medication">
-                      <p><strong>${medicationName}</strong>${dosage !== 'N/A' ? ' - ' + dosage : ''}</p>
+                      <p><strong>${name}</strong>${dosage !== 'As per doctor recommendation' ? ' - ' + dosage : ''}</p>
                       <p>Frequency: ${frequency}</p>
                       <p>Duration: ${duration}</p>
-                      <p>Reason: ${reason}</p>
-                      <p>Notes: ${notes}</p>
+                      <p>Instructions: ${instructions}</p>
                     </div>
                   `;
                 }).join('')
@@ -714,29 +692,20 @@ export class PrescriptionService {
         <div class="investigations">
           <h3>Recommended Investigations</h3>
           ${
-            Array.isArray(consultation.doctorDiagnosis?.recommended_investigations) && consultation.doctorDiagnosis.recommended_investigations.length > 0
-              ? consultation.doctorDiagnosis.recommended_investigations.map((test: any) => {
-                  if (test && typeof test === 'object') {
-                    return `
-                      <div class="investigation-test">
-                        <p>
-                          <strong>${test.name || 'Test'}</strong>
-                          ${test.reason ? ' - ' + test.reason : ''}
-                        </p>
-                        <p>Priority: ${test.priority || 'Normal'}</p>
-                      </div>
-                    `;
-                  } else if (typeof test === 'string') {
-                    return `
-                      <div class="investigation-test">
-                        <p><strong>${test}</strong></p>
-                      </div>
-                    `;
-                  } else {
-                    return '';
-                  }
+            // Use normalized prescriptionData.investigations instead of raw doctorDiagnosis data
+            Array.isArray(prescriptionData?.investigations) && prescriptionData.investigations.length > 0
+              ? prescriptionData.investigations.map((investigation: any) => {
+                  const name = investigation?.name || 'Investigation';
+                  const instructions = investigation?.instructions || 'As recommended by doctor';
+                  
+                  return `
+                    <div class="investigation-test">
+                      <p><strong>${name}</strong></p>
+                      <p>Instructions: ${instructions}</p>
+                    </div>
+                  `;
                 }).join('')
-              : '<p>No specific tests</p>'
+              : '<p>No specific investigations recommended</p>'
           }
         </div>
 
