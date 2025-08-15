@@ -281,16 +281,38 @@ export class PrescriptionService {
       } = consultation.doctorDiagnosis;
       this.logger.log(`Extracted data from doctorDiagnosis for consultation ${consultationId}`);
 
-      // Safe medication mapping
+      // Safe medication mapping - PRODUCTION FIX
       consultation.prescriptionData.medications = [];
       if (treatment_recommendations?.safe_medications) {
-        consultation.prescriptionData.medications = treatment_recommendations.safe_medications.map(med => ({ 
-          name: med, 
-          dosage: 'As per doctor recommendation', 
-          frequency: 'As per doctor recommendation',
-          duration: 'As per doctor recommendation',
-          instructions: 'As per doctor recommendation'
-        }));
+        consultation.prescriptionData.medications = treatment_recommendations.safe_medications.map(med => {
+          // Handle both string and object medication formats
+          if (typeof med === 'string') {
+            return {
+              name: med,
+              dosage: 'As per doctor recommendation',
+              frequency: 'As per doctor recommendation',
+              duration: 'As per doctor recommendation',
+              instructions: 'As per doctor recommendation'
+            };
+          } else if (med && typeof med === 'object') {
+            return {
+              name: med.name || 'Unknown Medication',
+              dosage: med.dosage || 'As per doctor recommendation',
+              frequency: med.frequency || 'As per doctor recommendation',
+              duration: med.duration || 'As per doctor recommendation',
+              instructions: med.notes || med.instructions || 'As per doctor recommendation'
+            };
+          } else {
+            // Fallback for invalid data
+            return {
+              name: 'Unknown Medication',
+              dosage: 'As per doctor recommendation',
+              frequency: 'As per doctor recommendation', 
+              duration: 'As per doctor recommendation',
+              instructions: 'As per doctor recommendation'
+            };
+          }
+        });
       }
       this.logger.log(`Medications populated: ${consultation.prescriptionData.medications.length} items`);
 
@@ -360,18 +382,26 @@ export class PrescriptionService {
     }
 
     try {
-      // Generate HTML content for PDF
+      this.logger.log(`Starting PDF generation process for consultation ${consultationId}`);
+      
+      // Generate HTML content for PDF with enhanced error handling
+      this.logger.log(`Generating HTML content for consultation ${consultationId}`);
       const htmlContent = this.generatePrescriptionHTML(consultation, user, true);
+      this.logger.log(`HTML content generated successfully for consultation ${consultationId}`);
       
-      // Generate PDF
+      // Generate PDF with enhanced logging
+      this.logger.log(`Starting PDF generation for consultation ${consultationId}`);
       const pdfBuffer = await this.pdfGenerationService.generatePdf(htmlContent, true);
+      this.logger.log(`PDF buffer generated successfully for consultation ${consultationId}`);
       
-      // Upload draft PDF to storage
+      // Upload draft PDF to storage with enhanced logging
+      this.logger.log(`Starting file upload for consultation ${consultationId}`);
       const uploadResult = await this.fileStorageService.uploadPdf(
         pdfBuffer,
         `prescription-draft-${consultation.consultationId}.pdf`,
         true,
       );
+      this.logger.log(`PDF uploaded successfully for consultation ${consultationId}: ${uploadResult.url}`);
 
       // Store draft PDF URL
       consultation.prescriptionData.draftPdfUrl = uploadResult.url;
@@ -387,8 +417,9 @@ export class PrescriptionService {
       );
 
       await consultation.save();
+      this.logger.log(`Consultation updated and saved for ${consultationId}`);
 
-      this.logger.log(`Preview PDF generated for consultation ${consultationId}`);
+      this.logger.log(`Preview PDF generated successfully for consultation ${consultationId}`);
 
       return {
         draftPdfUrl: uploadResult.url,
@@ -397,8 +428,26 @@ export class PrescriptionService {
         generatedAt: new Date(),
       };
     } catch (error) {
-      this.logger.error(`Failed to generate preview PDF for consultation ${consultationId}:`, error);
-      throw new InternalServerErrorException('Failed to generate prescription preview');
+      this.logger.error(`Failed to generate preview PDF for consultation ${consultationId}:`, error.message);
+      this.logger.error(`Error stack trace:`, error.stack);
+      
+      // More specific error handling based on error type
+      if (error.message?.includes('Puppeteer') || error.message?.includes('Chrome') || error.message?.includes('browser')) {
+        this.logger.error('PDF generation service error detected');
+        throw new InternalServerErrorException('PDF generation service is currently unavailable. Please try again later.');
+      } else if (error.message?.includes('ENOENT') || error.message?.includes('permission') || error.message?.includes('EACCES')) {
+        this.logger.error('File system error detected');
+        throw new InternalServerErrorException('File storage error occurred. Please contact support.');
+      } else if (error.message?.includes('ENOSPC')) {
+        this.logger.error('Disk space error detected');
+        throw new InternalServerErrorException('Insufficient storage space. Please contact support.');
+      } else if (error.name === 'ValidationError') {
+        this.logger.error('Data validation error detected');
+        throw new BadRequestException('Prescription data validation failed. Please check your input data.');
+      } else {
+        this.logger.error('Unknown error type:', typeof error, error.constructor.name);
+        throw new InternalServerErrorException('Failed to generate prescription preview');
+      }
     }
   }
 
@@ -617,27 +666,46 @@ export class PrescriptionService {
         <div class="medications">
           <h3>Medications</h3>
           ${
+            // PRODUCTION FIX: Enhanced medication rendering with malformed data handling
             Array.isArray(consultation.doctorDiagnosis?.treatment_recommendations?.safe_medications) && consultation.doctorDiagnosis.treatment_recommendations.safe_medications.length > 0
               ? consultation.doctorDiagnosis.treatment_recommendations.safe_medications.map((safeMed: any) => {
-                  if (safeMed && typeof safeMed === 'object') {
-                    return `
-                      <div class="medication">
-                        <p><strong>${safeMed.name || ''}</strong>${safeMed.dosage ? ' - ' + safeMed.dosage : ''}</p>
-                        <p>Frequency: ${safeMed.frequency || 'N/A'}</p>
-                        <p>Duration: ${safeMed.duration || 'N/A'}</p>
-                        <p>Reason: ${safeMed.reason || 'N/A'}</p>
-                        <p>Notes: ${safeMed.notes || 'N/A'}</p>
-                      </div>
-                    `;
-                  } else if (typeof safeMed === 'string') {
-                    return `
-                      <div class="medication">
-                        <p><strong>${safeMed}</strong></p>
-                      </div>
-                    `;
+                  // Defensive programming - handle both current malformed data and future correct data
+                  let medicationName, dosage, frequency, duration, reason, notes;
+                  
+                  if (typeof safeMed === 'string') {
+                    medicationName = safeMed;
+                    dosage = frequency = duration = reason = notes = 'N/A';
+                  } else if (safeMed && typeof safeMed === 'object') {
+                    // Handle nested object structure (current malformed data)
+                    if (safeMed.name && typeof safeMed.name === 'object') {
+                      medicationName = safeMed.name.name || 'Unknown Medication';
+                      dosage = safeMed.name.dosage || safeMed.dosage || 'N/A';
+                      frequency = safeMed.name.frequency || safeMed.frequency || 'N/A';
+                      duration = safeMed.name.duration || safeMed.duration || 'N/A';
+                      reason = safeMed.name.reason || safeMed.reason || 'N/A';
+                      notes = safeMed.name.notes || safeMed.notes || 'N/A';
+                    } else {
+                      // Handle normal object structure
+                      medicationName = safeMed.name || 'Unknown Medication';
+                      dosage = safeMed.dosage || 'N/A';
+                      frequency = safeMed.frequency || 'N/A';
+                      duration = safeMed.duration || 'N/A';
+                      reason = safeMed.reason || 'N/A';
+                      notes = safeMed.notes || 'N/A';
+                    }
                   } else {
-                    return '';
+                    return ''; // Skip invalid entries
                   }
+
+                  return `
+                    <div class="medication">
+                      <p><strong>${medicationName}</strong>${dosage !== 'N/A' ? ' - ' + dosage : ''}</p>
+                      <p>Frequency: ${frequency}</p>
+                      <p>Duration: ${duration}</p>
+                      <p>Reason: ${reason}</p>
+                      <p>Notes: ${notes}</p>
+                    </div>
+                  `;
                 }).join('')
               : '<p>No medications prescribed</p>'
           }
