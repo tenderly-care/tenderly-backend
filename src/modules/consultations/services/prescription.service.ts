@@ -633,7 +633,7 @@ export class PrescriptionService {
                     if (typeof d === 'string') {
                       return d;
                     } else if (d && typeof d === 'object' && 'name' in d) {
-                      return d.name;
+                      return `${d.name}${d.description ? ' - ' + d.description : ''}`;
                     }
                     return '';
                   })
@@ -641,26 +641,9 @@ export class PrescriptionService {
                   .join(', ') || 'Not specified'
               : 'Not specified'
           }</p>
-          ${
-            // Only show diagnosis description if we have object-based diagnoses with descriptions
-            Array.isArray(consultation.doctorDiagnosis?.possible_diagnoses) &&
-            consultation.doctorDiagnosis.possible_diagnoses.some((d: any) => 
-              d && typeof d === 'object' && 'description' in d && d.description
-            )
-              ? `<p><strong>Diagnosis Description:</strong> ${
-                  consultation.doctorDiagnosis.possible_diagnoses
-                    .map((d: any) => {
-                      if (d && typeof d === 'object' && 'description' in d) {
-                        return d.description;
-                      }
-                      return '';
-                    })
-                    .filter(Boolean)
-                    .join(', ')
-                }</p>`
-              : ''
-          }
           <p><strong>Clinical Reasoning:</strong> ${consultation.doctorDiagnosis?.clinical_reasoning || 'Not specified'}</p>
+          <p><strong>Confidence Score:</strong> ${consultation.doctorDiagnosis?.confidence_score || 'Not specified'}</p>
+          ${consultation.doctorDiagnosis?.processing_notes ? `<p><strong>Processing Notes:</strong> ${consultation.doctorDiagnosis.processing_notes}</p>` : ''}
         </div>
 
         <div class="medications">
