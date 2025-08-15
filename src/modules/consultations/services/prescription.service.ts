@@ -284,7 +284,7 @@ export class PrescriptionService {
       // Safe medication mapping - PRODUCTION FIX
       consultation.prescriptionData.medications = [];
       if (treatment_recommendations?.safe_medications) {
-        consultation.prescriptionData.medications = treatment_recommendations.safe_medications.map(med => {
+        consultation.prescriptionData.medications = treatment_recommendations.safe_medications.map((med: any) => {
           // Handle both string and object medication formats
           if (typeof med === 'string') {
             return {
