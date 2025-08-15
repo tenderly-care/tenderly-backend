@@ -107,10 +107,10 @@ export class AIAgentService {
     private readonly auditService: AuditService,
     private readonly aiTokenService: AITokenService,
   ) {
-    this.aiAgentUrl = this.configService.get<string>('AI_DIAGNOSIS_URL') || 'http://localhost:8000';
-    this.apiKey = this.configService.get<string>('AI_DIAGNOSIS_API_KEY') || '';
-    this.serviceName = this.configService.get<string>('AI_SERVICE_NAME') || 'tenderly-backend';
-    this.requestTimeout = this.configService.get<number>('AI_DIAGNOSIS_TIMEOUT') || 30000;
+    this.aiAgentUrl = this.configService.get<string>('ai.diagnosis.baseUrl') || 'http://localhost:8000';
+    this.apiKey = this.configService.get<string>('ai.diagnosis.apiKey') || '';
+    this.serviceName = this.configService.get<string>('ai.diagnosis.serviceName') || 'tenderly-backend';
+    this.requestTimeout = this.configService.get<number>('ai.diagnosis.timeout') || 30000;
     
     this.logger.log(`AI Agent Service initialized with URL: ${this.aiAgentUrl}, API Key: ${this.apiKey ? 'configured' : 'not configured'}, Service Name: ${this.serviceName}`);
     
