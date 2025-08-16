@@ -18,7 +18,6 @@ import {
   SignAndSendDto,
   PrescriptionWorkspaceResponseDto,
   PrescriptionStatusResponseDto,
-  PrescriptionPreviewResponseDto,
   SignedPrescriptionResponseDto,
   PrescriptionHistoryDto
 } from '../dto/prescription.dto';
@@ -371,86 +370,6 @@ export class PrescriptionService {
     }
   }
 
-  async generatePreview(
-    consultationId: string,
-    user: UserDocument,
-    metadata: { ipAddress: string; userAgent: string },
-  ): Promise<PrescriptionPreviewResponseDto> {
-    const consultation = await this.findAndValidateConsultation(consultationId, user._id as Types.ObjectId);
-
-    if (!consultation.doctorDiagnosis || !consultation.prescriptionData) {
-      throw new BadRequestException('Prescription draft is incomplete. Please complete diagnosis and medications.');
-    }
-
-    try {
-      this.logger.log(`Starting PDF generation process for consultation ${consultationId}`);
-      
-      // Generate HTML content for PDF with enhanced error handling
-      this.logger.log(`Generating HTML content for consultation ${consultationId}`);
-      const htmlContent = this.generatePrescriptionHTML(consultation, user, true);
-      this.logger.log(`HTML content generated successfully for consultation ${consultationId}`);
-      
-      // Generate PDF with enhanced logging
-      this.logger.log(`Starting PDF generation for consultation ${consultationId}`);
-      const pdfBuffer = await this.pdfGenerationService.generatePdf(htmlContent, true);
-      this.logger.log(`PDF buffer generated successfully for consultation ${consultationId}`);
-      
-      // Upload draft PDF to storage with enhanced logging
-      this.logger.log(`Starting file upload for consultation ${consultationId}`);
-      const uploadResult = await this.fileStorageService.uploadPdf(
-        pdfBuffer,
-        `prescription-draft-${consultation.consultationId}.pdf`,
-        true,
-      );
-      this.logger.log(`PDF uploaded successfully for consultation ${consultationId}: ${uploadResult.url}`);
-
-      // Store draft PDF URL
-      consultation.prescriptionData.draftPdfUrl = uploadResult.url;
-      consultation.prescriptionStatus = PrescriptionStatus.AWAITING_REVIEW;
-      
-      // Add to prescription history
-      this.addToPrescriptionHistory(
-        consultation,
-        PrescriptionAction.PREVIEW_GENERATED,
-        user._id as Types.ObjectId,
-        'Draft PDF generated for review',
-        metadata,
-      );
-
-      await consultation.save();
-      this.logger.log(`Consultation updated and saved for ${consultationId}`);
-
-      this.logger.log(`Preview PDF generated successfully for consultation ${consultationId}`);
-
-      return {
-        draftPdfUrl: uploadResult.url,
-        prescriptionStatus: consultation.prescriptionStatus,
-        message: 'Preview PDF generated successfully',
-        generatedAt: new Date(),
-      };
-    } catch (error) {
-      this.logger.error(`Failed to generate preview PDF for consultation ${consultationId}:`, error.message);
-      this.logger.error(`Error stack trace:`, error.stack);
-      
-      // More specific error handling based on error type
-      if (error.message?.includes('Puppeteer') || error.message?.includes('Chrome') || error.message?.includes('browser')) {
-        this.logger.error('PDF generation service error detected');
-        throw new InternalServerErrorException('PDF generation service is currently unavailable. Please try again later.');
-      } else if (error.message?.includes('ENOENT') || error.message?.includes('permission') || error.message?.includes('EACCES')) {
-        this.logger.error('File system error detected');
-        throw new InternalServerErrorException('File storage error occurred. Please contact support.');
-      } else if (error.message?.includes('ENOSPC')) {
-        this.logger.error('Disk space error detected');
-        throw new InternalServerErrorException('Insufficient storage space. Please contact support.');
-      } else if (error.name === 'ValidationError') {
-        this.logger.error('Data validation error detected');
-        throw new BadRequestException('Prescription data validation failed. Please check your input data.');
-      } else {
-        this.logger.error('Unknown error type:', typeof error, error.constructor.name);
-        throw new InternalServerErrorException('Failed to generate prescription preview');
-      }
-    }
-  }
 
   async signAndSendPrescription(
     consultationId: string,
@@ -1082,13 +1001,17 @@ export class PrescriptionService {
   // HYBRID PDF APPROACH: Stream drafts, store signed PDFs
   
   /**
-   * Stream draft PDF directly to client without storing on server
-   * This saves server storage space and provides instant preview
+   * Enhanced Preview functionality: Stream draft PDF + Generate Preview functionality
+   * - Streams PDF directly to client for instant preview (original functionality)
+   * - Stores PDF to cloud storage and updates prescription status (Generate Preview functionality)
+   * - Updates prescription status from PRESCRIPTION_DRAFT to AWAITING_REVIEW
+   * - Maintains audit trail in prescription history
    */
   async streamDraftPdf(
     consultationId: string,
     user: UserDocument,
     res: Response,
+    metadata: { ipAddress: string; userAgent: string },
   ): Promise<void> {
     const consultation = await this.findAndValidateConsultation(consultationId, user._id as Types.ObjectId);
 
@@ -1097,15 +1020,45 @@ export class PrescriptionService {
     }
 
     try {
-      this.logger.log(`Streaming draft PDF for consultation ${consultationId}`);
+      this.logger.log(`Starting enhanced preview for consultation ${consultationId} - streaming + storage + status update`);
       
       // Generate HTML content for draft PDF
+      this.logger.log(`Generating HTML content for consultation ${consultationId}`);
       const htmlContent = this.generatePrescriptionHTML(consultation, user, true);
+      this.logger.log(`HTML content generated successfully for consultation ${consultationId}`);
       
-      // Generate PDF buffer (no file saving)
+      // Generate PDF buffer 
+      this.logger.log(`Starting PDF generation for consultation ${consultationId}`);
       const pdfBuffer = await this.pdfGenerationService.generatePdf(htmlContent, true);
+      this.logger.log(`PDF buffer generated successfully for consultation ${consultationId}`);
       
-      // Set response headers for PDF streaming
+      // **NEW: Store PDF to cloud storage (Generate Preview functionality)**
+      this.logger.log(`Starting file upload for consultation ${consultationId}`);
+      const uploadResult = await this.fileStorageService.uploadPdf(
+        pdfBuffer,
+        `prescription-draft-${consultation.consultationId}.pdf`,
+        true, // isDraft = true
+      );
+      this.logger.log(`PDF uploaded successfully for consultation ${consultationId}: ${uploadResult.url}`);
+
+      // **NEW: Update database with draft PDF URL and status change**
+      consultation.prescriptionData.draftPdfUrl = uploadResult.url;
+      consultation.prescriptionStatus = PrescriptionStatus.AWAITING_REVIEW;
+      
+      // **NEW: Add to prescription history**
+      this.addToPrescriptionHistory(
+        consultation,
+        PrescriptionAction.PREVIEW_GENERATED,
+        user._id as Types.ObjectId,
+        'Enhanced preview: PDF generated, stored, and streamed for review',
+        metadata,
+      );
+
+      // **NEW: Save consultation with updated status and data**
+      await consultation.save();
+      this.logger.log(`Consultation updated and saved for ${consultationId}`);
+      
+      // **ORIGINAL: Stream PDF directly to client for instant preview**
       const filename = `prescription-draft-${consultation.consultationId}.pdf`;
       
       res.set({
@@ -1115,20 +1068,57 @@ export class PrescriptionService {
         'Cache-Control': 'no-cache, no-store, must-revalidate', // Prevent caching of drafts
         'Pragma': 'no-cache',
         'Expires': '0',
-        'X-PDF-Type': 'draft'
+        'X-PDF-Type': 'draft',
+        // **NEW: Additional headers with enhanced functionality info**
+        'X-PDF-Storage-URL': uploadResult.url,
+        'X-Prescription-Status': consultation.prescriptionStatus,
+        'X-Enhanced-Preview': 'true'
       });
       
       // Stream PDF directly to client
       res.end(pdfBuffer);
       
-      this.logger.log(`Draft PDF streamed successfully for consultation ${consultationId}`);
+      this.logger.log(`Enhanced preview completed successfully for consultation ${consultationId}`);
+      this.logger.log(`- PDF streamed to client for instant preview`);
+      this.logger.log(`- PDF stored at: ${uploadResult.url}`);
+      this.logger.log(`- Status updated to: ${consultation.prescriptionStatus}`);
       
     } catch (error) {
-      this.logger.error(`Failed to stream draft PDF for consultation ${consultationId}:`, error.message);
-      res.status(500).json({ 
-        error: 'Failed to generate draft PDF', 
-        message: 'Please try again or contact support if the issue persists.' 
-      });
+      this.logger.error(`Failed to process enhanced preview for consultation ${consultationId}:`, error.message);
+      this.logger.error(`Error stack trace:`, error.stack);
+      
+      // Enhanced error handling similar to generatePreview
+      if (error.message?.includes('Puppeteer') || error.message?.includes('Chrome') || error.message?.includes('browser')) {
+        this.logger.error('PDF generation service error detected');
+        res.status(500).json({
+          error: 'PDF generation service is currently unavailable',
+          message: 'Please try again later.'
+        });
+      } else if (error.message?.includes('ENOENT') || error.message?.includes('permission') || error.message?.includes('EACCES')) {
+        this.logger.error('File system error detected');
+        res.status(500).json({
+          error: 'File storage error occurred',
+          message: 'Please contact support.'
+        });
+      } else if (error.message?.includes('ENOSPC')) {
+        this.logger.error('Disk space error detected');
+        res.status(500).json({
+          error: 'Insufficient storage space',
+          message: 'Please contact support.'
+        });
+      } else if (error.name === 'ValidationError') {
+        this.logger.error('Data validation error detected');
+        res.status(400).json({
+          error: 'Prescription data validation failed',
+          message: 'Please check your input data.'
+        });
+      } else {
+        this.logger.error('Unknown error type:', typeof error, error.constructor.name);
+        res.status(500).json({ 
+          error: 'Failed to generate and process draft PDF', 
+          message: 'Please try again or contact support if the issue persists.' 
+        });
+      }
     }
   }
 

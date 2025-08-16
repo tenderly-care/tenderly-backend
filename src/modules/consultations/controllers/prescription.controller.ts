@@ -36,7 +36,6 @@ import {
   SignAndSendDto,
   PrescriptionWorkspaceResponseDto,
   PrescriptionStatusResponseDto,
-  PrescriptionPreviewResponseDto,
   SignedPrescriptionResponseDto,
   PrescriptionHistoryDto
 } from '../dto/prescription.dto';
@@ -136,29 +135,6 @@ export class PrescriptionController {
     );
   }
 
-  @Post('generate-preview')
-  @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.SUPER_DOC)
-  @HttpCode(HttpStatus.OK)
-  @ApiOperation({ summary: 'Generate prescription PDF preview' })
-  @ApiResponse({
-    status: 200,
-    description: 'PDF preview generated successfully',
-    type: PrescriptionPreviewResponseDto,
-  })
-  async generatePreview(
-    @Param('id') consultationId: string,
-    @GetUser() user: UserDocument,
-    @Req() req: Request,
-  ): Promise<PrescriptionPreviewResponseDto> {
-    return this.prescriptionService.generatePreview(
-      consultationId, 
-      user,
-      {
-        ipAddress: req.ip || 'unknown',
-        userAgent: req.headers['user-agent'] || 'unknown',
-      }
-    );
-  }
 
   @Post('sign-and-send')
   @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.SUPER_DOC)
@@ -203,10 +179,13 @@ export class PrescriptionController {
 
   @Get('pdf/preview')
   @Roles(UserRole.HEALTHCARE_PROVIDER, UserRole.SUPER_DOC)
-  @ApiOperation({ summary: 'Stream prescription draft PDF for preview' })
+  @ApiOperation({ 
+    summary: 'Enhanced Preview: Stream draft PDF + Generate Preview functionality', 
+    description: 'Streams PDF directly to client for instant preview while also storing PDF in cloud storage and updating prescription status from PRESCRIPTION_DRAFT to AWAITING_REVIEW. Combines the benefits of both original streaming and generate preview functionalities.'
+  })
   @ApiResponse({
     status: 200,
-    description: 'PDF streamed successfully',
+    description: 'Enhanced preview completed: PDF streamed successfully, stored in cloud, and prescription status updated',
     content: {
       'application/pdf': {
         schema: {
@@ -214,14 +193,45 @@ export class PrescriptionController {
           format: 'binary'
         }
       }
+    },
+    headers: {
+      'X-PDF-Storage-URL': {
+        description: 'URL where the PDF is stored in cloud storage',
+        schema: { type: 'string' }
+      },
+      'X-Prescription-Status': {
+        description: 'Updated prescription status after processing',
+        schema: { type: 'string', enum: ['awaiting_review'] }
+      },
+      'X-Enhanced-Preview': {
+        description: 'Indicates enhanced functionality was used',
+        schema: { type: 'string', enum: ['true'] }
+      }
     }
+  })
+  @ApiResponse({
+    status: 400,
+    description: 'Prescription draft is incomplete or prescription data validation failed'
+  })
+  @ApiResponse({
+    status: 500,
+    description: 'PDF generation, file storage, or processing error'
   })
   async streamDraftPdf(
     @Param('id') consultationId: string,
     @GetUser() user: UserDocument,
+    @Req() req: Request,
     @Res() res: Response,
   ): Promise<void> {
-    return this.prescriptionService.streamDraftPdf(consultationId, user, res);
+    return this.prescriptionService.streamDraftPdf(
+      consultationId, 
+      user, 
+      res,
+      {
+        ipAddress: req.ip || 'unknown',
+        userAgent: req.headers['user-agent'] || 'unknown',
+      }
+    );
   }
 
   @Get('pdf/download')
